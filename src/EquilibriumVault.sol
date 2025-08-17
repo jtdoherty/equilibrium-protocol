@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import {ERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol"; // Using the implementation for totalSupply
+import {m_ybBTC} from "./m_ybBTC.sol"; // Import our new contract
 
 /**
  * @title EquilibriumVault
@@ -17,7 +17,7 @@ contract EquilibriumVault is Ownable {
     // --- State Variables ---
 
     IERC20 public immutable YB_BTC;
-    ERC20 public immutable M_YB_BTC; // Changed to ERC20 to access totalSupply()
+    m_ybBTC public immutable M_YB_BTC; // Use the specific contract type
     address public ybStakingPool;
     address public strategyManager;
     bool public isStaked;
@@ -46,28 +46,55 @@ contract EquilibriumVault is Ownable {
 
     constructor(address _ybBTC, address _m_ybBTC) Ownable(msg.sender) {
         YB_BTC = IERC20(_ybBTC);
-        M_YB_BTC = ERC20(_m_ybBTC);
+        M_YB_BTC = m_ybBTC(_m_ybBTC); // Cast to our specific contract type
     }
 
     // --- Logic ---
 
-    /**
-     * @notice Calculates the total amount of ybBTC managed by this vault.
-     * @dev This includes the ybBTC held in this contract plus any ybBTC staked in the pool.
-     */
     function totalAssets() public view returns (uint256) {
-        // Balance of this contract + Balance staked in the pool
         return YB_BTC.balanceOf(address(this)) + YB_BTC.balanceOf(ybStakingPool);
     }
 
     // --- User-Facing Functions ---
 
     function deposit(uint256 _amount) external {
-        // TODO: Implement deposit logic
+        if (_amount == 0) revert ZeroAmount();
+
+        uint256 totalShares = M_YB_BTC.totalSupply();
+        uint256 totalVaultAssets = totalAssets();
+        uint256 sharesToMint;
+
+        if (totalShares == 0 || totalVaultAssets == 0) {
+            sharesToMint = _amount;
+        } else {
+            sharesToMint = (_amount * totalShares) / totalVaultAssets;
+        }
+
+        if (sharesToMint == 0) revert ZeroAmount();
+
+        YB_BTC.safeTransferFrom(msg.sender, address(this), _amount);
+
+        // This call now works because our m_ybBTC contract has a public, ownable mint function.
+        M_YB_BTC.mint(msg.sender, sharesToMint);
+
+        emit Deposit(msg.sender, _amount, sharesToMint);
     }
 
     function withdraw(uint256 _mybbtcAmount) external {
-        // TODO: Implement withdraw logic
+        if (_mybbtcAmount == 0) revert ZeroAmount();
+
+        uint256 totalShares = M_YB_BTC.totalSupply();
+        uint256 totalVaultAssets = totalAssets();
+        uint256 assetsToReturn = (_mybbtcAmount * totalVaultAssets) / totalShares;
+
+        if (assetsToReturn == 0) revert ZeroAmount();
+
+        // This requires the user to have first approved the vault.
+        M_YB_BTC.burnFrom(msg.sender, _mybbtcAmount);
+
+        YB_BTC.safeTransfer(msg.sender, assetsToReturn);
+
+        emit Withdraw(msg.sender, assetsToReturn, _mybbtcAmount);
     }
 
     // --- Strategy Functions (Restricted) ---
