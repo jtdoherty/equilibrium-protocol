@@ -4,7 +4,6 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {YBLocker, IVotingEscrow} from "../src/YBLocker.sol";
 import {MockERC20} from "./EquilibriumVault.t.sol";
-// You correctly identified that this import is needed!
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 contract MockVotingEscrow is IVotingEscrow {
@@ -22,19 +21,15 @@ contract MockVotingEscrow is IVotingEscrow {
         lockedAmount += value;
         unlockTime = newUnlockTime;
         callCountCreateLock++;
-        // --- CORRECTED LINE ---
         bool success = IERC20(token).transferFrom(msg.sender, address(this), value);
         require(success, "Mock transferFrom failed in createLock");
-        // --- END CORRECTION ---
     }
 
     function increaseAmount(uint256 value) external {
         lockedAmount += value;
         callCountIncreaseAmount++;
-        // --- CORRECTED LINE ---
         bool success = IERC20(token).transferFrom(msg.sender, address(this), value);
         require(success, "Mock transferFrom failed in increaseAmount");
-        // --- END CORRECTION ---
     }
 }
 
@@ -54,7 +49,13 @@ contract YBLockerTest is Test {
 
     function test_FirstLock_CallsCreateLock() public {
         ybToken.mint(address(locker), 100 ether);
+
+        // --- CORRECTION: We must call lock() as the owner. ---
+        vm.startPrank(owner);
         locker.lock();
+        vm.stopPrank();
+        // --- END CORRECTION ---
+
         assertEq(votingEscrow.lockedAmount(), 100 ether, "Escrow should have 100 tokens");
         assertEq(votingEscrow.callCountCreateLock(), 1, "createLock should be called once");
         assertEq(votingEscrow.callCountIncreaseAmount(), 0, "increaseAmount should not be called");
@@ -63,9 +64,18 @@ contract YBLockerTest is Test {
 
     function test_SubsequentLock_CallsIncreaseAmount() public {
         ybToken.mint(address(locker), 100 ether);
+        // --- CORRECTION: First lock must be from the owner. ---
+        vm.startPrank(owner);
         locker.lock();
+        vm.stopPrank();
+
         ybToken.mint(address(locker), 50 ether);
+        // --- CORRECTION: Second lock must also be from the owner. ---
+        vm.startPrank(owner);
         locker.lock();
+        vm.stopPrank();
+        // --- END CORRECTION ---
+
         assertEq(votingEscrow.lockedAmount(), 150 ether, "Escrow should have 150 tokens total");
         assertEq(votingEscrow.callCountCreateLock(), 1, "createLock should only be called once");
         assertEq(votingEscrow.callCountIncreaseAmount(), 1, "increaseAmount should be called once");
