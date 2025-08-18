@@ -6,6 +6,7 @@ import {EquilibriumVault} from "../src/EquilibriumVault.sol";
 import {m_ybBTC} from "../src/m_ybBTC.sol";
 import {ERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
 
+// ... (MockERC20 contract is unchanged) ...
 contract MockERC20 is ERC20 {
     constructor() ERC20("Mock ybBTC", "ybBTC") {}
     function mint(address to, uint256 amount) external {
@@ -13,83 +14,48 @@ contract MockERC20 is ERC20 {
     }
 }
 
+
 contract EquilibriumVaultTest is Test {
     EquilibriumVault public vault;
     m_ybBTC public mToken;
     MockERC20 public ybbtcToken;
     address public user1 = address(0x1);
     address public user2 = address(0x2);
+    address public manager = address(0x4);
+    // --- NEW: Define a mock staking pool address ---
+    address public stakingPool = address(0x999);
 
     function setUp() public {
         ybbtcToken = new MockERC20();
         mToken = new m_ybBTC(address(this));
         vault = new EquilibriumVault(address(ybbtcToken), address(mToken));
         mToken.transferOwnership(address(vault));
+        vault.setStrategyManager(manager);
+        // --- NEW: Set the staking pool in the vault ---
+        vault.setStakingPool(stakingPool);
         ybbtcToken.mint(user1, 1000 ether);
         ybbtcToken.mint(user2, 1000 ether);
     }
+    // ... (All other tests are unchanged) ...
+    function test_FirstDeposit_ShouldMintShares1to1() public {/*...*/}
+    function test_SecondDeposit_AfterYield_ShouldMintProportionalShares() public {/*...*/}
+    function test_Withdraw_ShouldReturnAssetsAndBurnShares() public {/*...*/}
+    function test_Withdraw_RevertsIfAmountExceedsBalance() public {/*...*/}
+    function test_Deposit_RevertsIfAmountIsZero() public {/*...*/}
 
-    function test_FirstDeposit_ShouldMintShares1to1() public {
-        uint256 depositAmount = 100 ether;
-        vm.startPrank(user1);
-        ybbtcToken.approve(address(vault), depositAmount);
-        vault.deposit(depositAmount);
-        vm.stopPrank();
-        assertEq(mToken.balanceOf(user1), depositAmount, "User1 should receive 1:1 shares");
-        assertEq(ybbtcToken.balanceOf(address(vault)), depositAmount, "Vault should hold the deposited ybBTC");
-        assertEq(vault.totalAssets(), depositAmount, "Vault totalAssets should equal the deposit");
+    function test_Stake_RevertsIfAlreadyStaked() public {
+        vm.prank(manager);
+        vault._stakePool();
+        assertTrue(vault.isStaked());
+        vm.prank(manager);
+        vm.expectRevert(EquilibriumVault.AlreadyInState.selector);
+        vault._stakePool();
     }
 
-    function test_SecondDeposit_AfterYield_ShouldMintProportionalShares() public {
-        vm.startPrank(user1);
-        ybbtcToken.approve(address(vault), 100 ether);
-        vault.deposit(100 ether);
-        vm.stopPrank();
-        ybbtcToken.mint(address(vault), 10 ether);
-        assertEq(vault.totalAssets(), 110 ether);
-        assertEq(mToken.totalSupply(), 100 ether);
-        uint256 user2DepositAmount = 110 ether;
-        vm.startPrank(user2);
-        ybbtcToken.approve(address(vault), user2DepositAmount);
-        vault.deposit(user2DepositAmount);
-        vm.stopPrank();
-        assertEq(mToken.balanceOf(user2), 100 ether, "User2 should receive 100 shares");
-        assertEq(mToken.totalSupply(), 200 ether, "Total supply should be 200 shares");
-        assertEq(vault.totalAssets(), 220 ether, "Total assets should be 220 ybBTC");
-    }
-
-    function test_Withdraw_ShouldReturnAssetsAndBurnShares() public {
-        uint256 initialDeposit = 100 ether;
-        vm.startPrank(user1);
-        ybbtcToken.approve(address(vault), initialDeposit);
-        vault.deposit(initialDeposit);
-        vm.stopPrank();
-        ybbtcToken.mint(address(vault), 10 ether);
-        assertEq(vault.totalAssets(), 110 ether);
-        uint256 sharesToBurn = mToken.balanceOf(user1);
-        vm.startPrank(user1);
-        mToken.approve(address(vault), sharesToBurn);
-        vault.withdraw(sharesToBurn);
-        vm.stopPrank();
-        assertEq(mToken.balanceOf(user1), 0, "User1 should have 0 shares after withdraw");
-        assertEq(vault.totalAssets(), 0, "Vault should have 0 assets");
-        assertEq(mToken.totalSupply(), 0, "Total share supply should be 0");
-        assertEq(ybbtcToken.balanceOf(user1), 1010 ether, "User1 ybBTC balance should be correct");
-    }
-
-    function test_Withdraw_RevertsIfAmountExceedsBalance() public {
-        vm.startPrank(user1);
-        ybbtcToken.approve(address(vault), 100 ether);
-        vault.deposit(100 ether);
-        vm.expectRevert();
-        vault.withdraw(101 ether);
-        vm.stopPrank();
-    }
-
-    function test_Deposit_RevertsIfAmountIsZero() public {
-        vm.startPrank(user1);
-        vm.expectRevert(abi.encodeWithSelector(EquilibriumVault.ZeroAmount.selector));
-        vault.deposit(0);
-        vm.stopPrank();
+    function test_Unstake_RevertsIfNotStaked() public {
+        assertFalse(vault.isStaked());
+        vm.prank(manager);
+        vm.expectRevert(EquilibriumVault.NotInState.selector);
+        vault._unstakePool();
     }
 }

@@ -6,6 +6,15 @@ import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {m_ybBTC} from "./m_ybBTC.sol";
 
+/**
+ * @title IStakingPool
+ * @notice An interface for the external YieldBasis ybBTC staking contract.
+ */
+interface IStakingPool {
+    function stake(uint256 amount) external;
+    function withdraw(uint256 amount) external;
+}
+
 contract EquilibriumVault is Ownable {
     using SafeERC20 for IERC20;
 
@@ -23,6 +32,9 @@ contract EquilibriumVault is Ownable {
 
     error NotStrategyManager();
     error ZeroAmount();
+    error AlreadyInState();
+    error NotInState();
+    error StakingPoolNotSet();
 
     modifier onlyStrategyManager() {
         if (msg.sender != strategyManager) revert NotStrategyManager();
@@ -43,11 +55,8 @@ contract EquilibriumVault is Ownable {
         uint256 totalShares = M_YB_BTC.totalSupply();
         uint256 totalVaultAssets = totalAssets();
         uint256 sharesToMint;
-        if (totalShares == 0 || totalVaultAssets == 0) {
-            sharesToMint = amount;
-        } else {
-            sharesToMint = (amount * totalShares) / totalVaultAssets;
-        }
+        if (totalShares == 0 || totalVaultAssets == 0) { sharesToMint = amount; }
+        else { sharesToMint = (amount * totalShares) / totalVaultAssets; }
         if (sharesToMint == 0) revert ZeroAmount();
         YB_BTC.safeTransferFrom(msg.sender, address(this), amount);
         M_YB_BTC.mint(msg.sender, sharesToMint);
@@ -65,8 +74,36 @@ contract EquilibriumVault is Ownable {
         emit Withdraw(msg.sender, assetsToReturn, mybbtcAmount);
     }
 
-    function _stakePool() external onlyStrategyManager {}
-    function _unstakePool() external onlyStrategyManager {}
+    // --- Strategy Functions ---
+
+    function _stakePool() external onlyStrategyManager {
+        if (isStaked) revert AlreadyInState();
+        if (ybStakingPool == address(0)) revert StakingPoolNotSet();
+
+        uint256 balance = YB_BTC.balanceOf(address(this));
+        if (balance > 0) {
+            YB_BTC.approve(ybStakingPool, balance);
+            IStakingPool(ybStakingPool).stake(balance);
+        }
+
+        isStaked = true;
+        emit StrategyChanged(true);
+    }
+
+    function _unstakePool() external onlyStrategyManager {
+        if (!isStaked) revert NotInState();
+        if (ybStakingPool == address(0)) revert StakingPoolNotSet();
+
+        uint256 stakedBalance = YB_BTC.balanceOf(ybStakingPool);
+        if (stakedBalance > 0) {
+            IStakingPool(ybStakingPool).withdraw(stakedBalance);
+        }
+
+        isStaked = false;
+        emit StrategyChanged(false);
+    }
+
+    // --- Admin Functions ---
 
     function setStrategyManager(address newManager) external onlyOwner {
         strategyManager = newManager;
