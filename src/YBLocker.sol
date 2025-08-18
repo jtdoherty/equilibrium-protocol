@@ -23,7 +23,7 @@ contract YBLocker is Ownable {
         VOTING_ESCROW = IVotingEscrow(votingEscrowAddress);
     }
 
-    function lock() external {
+    function lock() external onlyOwner {
         uint256 balance = YB_TOKEN.balanceOf(address(this));
         if (balance == 0) return;
         YB_TOKEN.approve(address(VOTING_ESCROW), 0);
