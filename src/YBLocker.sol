@@ -7,6 +7,7 @@ import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 interface IVotingEscrow {
     function createLock(uint256 value, uint256 unlockTime) external;
     function increaseAmount(uint256 value) external;
+    function increaseUnlockTime(uint256 unlockTime) external;
 }
 
 contract YBLocker is Ownable {
@@ -25,6 +26,15 @@ contract YBLocker is Ownable {
 
     function lock() external onlyOwner {
         uint256 balance = YB_TOKEN.balanceOf(address(this));
+
+        // If a lock exists and is less than 4 years from now, extend it.
+        if (lockEndTime > 0 && lockEndTime < block.timestamp + MAX_LOCK_TIME) {
+            uint256 newUnlockTime = block.timestamp + MAX_LOCK_TIME;
+            lockEndTime = newUnlockTime;
+            VOTING_ESCROW.increaseUnlockTime(newUnlockTime);
+            // We can emit an event here if desired
+        }
+
         if (balance == 0) return;
         YB_TOKEN.approve(address(VOTING_ESCROW), 0);
         YB_TOKEN.approve(address(VOTING_ESCROW), balance);

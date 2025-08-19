@@ -12,6 +12,8 @@ contract MockVotingEscrow is IVotingEscrow {
     address public token;
     uint256 public callCountCreateLock;
     uint256 public callCountIncreaseAmount;
+    // --- NEW: Counter for increaseUnlockTime calls ---
+    uint256 public callCountIncreaseUnlockTime;
 
     constructor(address tokenAddress) {
         token = tokenAddress;
@@ -31,6 +33,12 @@ contract MockVotingEscrow is IVotingEscrow {
         bool success = IERC20(token).transferFrom(msg.sender, address(this), value);
         require(success, "Mock transferFrom failed in increaseAmount");
     }
+
+    // --- NEW: Mock implementation for increaseUnlockTime ---
+    function increaseUnlockTime(uint256 newUnlockTime) external {
+        unlockTime = newUnlockTime;
+        callCountIncreaseUnlockTime++;
+    }
 }
 
 contract YBLockerTest is Test {
@@ -49,35 +57,35 @@ contract YBLockerTest is Test {
 
     function test_FirstLock_CallsCreateLock() public {
         ybToken.mint(address(locker), 100 ether);
-
-        // --- CORRECTION: We must call lock() as the owner. ---
         vm.startPrank(owner);
         locker.lock();
         vm.stopPrank();
-        // --- END CORRECTION ---
-
         assertEq(votingEscrow.lockedAmount(), 100 ether, "Escrow should have 100 tokens");
         assertEq(votingEscrow.callCountCreateLock(), 1, "createLock should be called once");
         assertEq(votingEscrow.callCountIncreaseAmount(), 0, "increaseAmount should not be called");
+        // --- NEW: Check increaseUnlockTime call count ---
+        assertEq(votingEscrow.callCountIncreaseUnlockTime(), 0, "increaseUnlockTime should not be called on first lock");
         assertGt(locker.lockEndTime(), block.timestamp, "Lock end time should be in the future");
     }
 
     function test_SubsequentLock_CallsIncreaseAmount() public {
         ybToken.mint(address(locker), 100 ether);
-        // --- CORRECTION: First lock must be from the owner. ---
         vm.startPrank(owner);
         locker.lock();
         vm.stopPrank();
 
+        // Simulate a small time passage for the lockEndTime to become slightly in the past relative to MAX_LOCK_TIME for the next call
+        vm.warp(block.timestamp + 1 days); // Move time forward slightly
+
         ybToken.mint(address(locker), 50 ether);
-        // --- CORRECTION: Second lock must also be from the owner. ---
         vm.startPrank(owner);
         locker.lock();
         vm.stopPrank();
-        // --- END CORRECTION ---
 
         assertEq(votingEscrow.lockedAmount(), 150 ether, "Escrow should have 150 tokens total");
         assertEq(votingEscrow.callCountCreateLock(), 1, "createLock should only be called once");
         assertEq(votingEscrow.callCountIncreaseAmount(), 1, "increaseAmount should be called once");
+        // --- NEW: Check increaseUnlockTime call count (should be 1 because we extended it) ---
+        assertEq(votingEscrow.callCountIncreaseUnlockTime(), 1, "increaseUnlockTime should be called once on subsequent lock");
     }
 }

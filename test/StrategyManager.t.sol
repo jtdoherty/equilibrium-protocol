@@ -22,10 +22,34 @@ contract TestStrategyManager is StrategyManager {
 }
 
 contract MockStakingPool is IStakingPool {
-    IERC20 public immutable ybbtc;
-    constructor(address ybbtcAddress) { ybbtc = IERC20(ybbtcAddress); }
-    function stake(uint256 amount) external { ybbtc.transferFrom(msg.sender, address(this), amount); }
-    function withdraw(uint256 amount) external { ybbtc.transfer(msg.sender, amount); }
+    IERC20 public immutable YBBTC;
+    // Add a mapping to track staked balances per user
+    mapping(address => uint256) public userStakes;
+
+    constructor(address ybbtcAddress) {
+        YBBTC = IERC20(ybbtcAddress);
+    }
+
+    function stake(uint256 amount) external {
+        // Transfer tokens to the pool contract
+        require(YBBTC.transferFrom(msg.sender, address(this), amount), "TransferFrom failed");
+        // Record the stake for the user (msg.sender)
+        userStakes[msg.sender] += amount;
+    }
+
+    function withdraw(uint256 amount) external {
+        // Ensure the user has enough staked balance
+        require(userStakes[msg.sender] >= amount, "Not enough staked balance to withdraw");
+        // Transfer tokens from the pool contract to the user
+        require(YBBTC.transfer(msg.sender, amount), "Transfer failed");
+        // Reduce the user's staked balance
+        userStakes[msg.sender] -= amount;
+    }
+    
+    // Correctly returns the amount staked by a specific user
+    function balanceOf(address account) external view returns (uint256) {
+        return userStakes[account];
+    }
 }
 
 contract StrategyManagerTest is Test {
