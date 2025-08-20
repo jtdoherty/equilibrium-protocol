@@ -5,7 +5,6 @@ import {ERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/ERC20.sol"
 import {AccessControl} from "lib/openzeppelin-contracts/contracts/access/AccessControl.sol";
 
 contract EQM is ERC20, AccessControl {
-    // Define a unique role for minters.
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
     // @dev The deployer (msg.sender) is initially granted the MINTER_ROLE.
@@ -17,6 +16,7 @@ contract EQM is ERC20, AccessControl {
     }
 
     // @dev Only accounts with the MINTER_ROLE can call this function.
+    
     function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {
         _mint(to, amount);
     }
