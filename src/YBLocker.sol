@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import {m_YB} from "./m_YB.sol"; // Import the new m_YB token
+import {m_YB} from "./m_YB.sol";
 
 interface IVotingEscrow {
     function createLock(uint256 value, uint256 unlockTime) external;
@@ -15,7 +15,7 @@ contract YBLocker is Ownable {
     uint256 public constant MAX_LOCK_TIME = 4 * 365 days;
     IERC20 public immutable YB_TOKEN;
     IVotingEscrow public immutable VOTING_ESCROW;
-    m_YB public immutable M_YB_TOKEN; // Add the m_YB token
+    m_YB public immutable M_YB_TOKEN;
 
     uint256 public lockEndTime;
 
@@ -25,7 +25,7 @@ contract YBLocker is Ownable {
     constructor(address ybTokenAddress, address votingEscrowAddress, address mYbTokenAddress) Ownable(msg.sender) {
         YB_TOKEN = IERC20(ybTokenAddress);
         VOTING_ESCROW = IVotingEscrow(votingEscrowAddress);
-        M_YB_TOKEN = m_YB(mYbTokenAddress); // Set m_YB address
+        M_YB_TOKEN = m_YB(mYbTokenAddress);
     }
 
     function lock() external onlyOwner {
@@ -51,7 +51,6 @@ contract YBLocker is Ownable {
             emit Relocked(balance);
         }
 
-        // Mint m_YB to the owner (the protocol treasury/DAO)
         M_YB_TOKEN.mint(owner(), balance);
     }
 }
