@@ -17,8 +17,7 @@ contract Booster is Ownable, ReentrancyGuard {
     uint256 public totalStaked;
     mapping(address => uint256) public stakedBalances;
 
-    // --- Time-Weighted Reward Variables ---
-    uint256 public rewardRate; // EQM per second
+    uint256 public rewardRate;
     uint256 public lastUpdateTime;
     uint256 public periodFinish;
     uint256 public rewardPerTokenStored;
