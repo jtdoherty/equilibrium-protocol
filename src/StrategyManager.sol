@@ -31,16 +31,14 @@ contract StrategyManager is Ownable {
      * @notice Gets the APR for the unstaked strategy (trading fees).
      * @return APR in Basis Points (BPS), where 500 = 5.00%
      */
-    // --- CORRECTION: Changed from `pure` to `view` and added `virtual` ---
     function getUnstakedApr() public view virtual returns (uint256) {
         return 500;
     }
 
     /**
-     * @notice Gets the APR for the unstaked strategy (trading fees).
-     * @return APR in Basis Points (BPS), where 500 = 5.00%
+     * @notice Gets the APR for the staked strategy (trading fees).
+     * @return APR in Basis Points (BPS), where 600 = 6.00%
      */
-    // --- CORRECTION: Changed from `pure` to `view` and added `virtual` ---
     function getStakedApr() public view virtual returns (uint256) {
         return 600;
     }
@@ -69,7 +67,6 @@ contract StrategyManager is Ownable {
     }
 
     function setSwitchBuffer(uint256 newBufferBps) external onlyOwner {
-        // --- AUDIT FIX: Enforce a minimum buffer to prevent thrashing ---
         require(newBufferBps >= MIN_SWITCH_BUFFER_BPS, "Buffer too low");
         switchBufferBps = newBufferBps;
         emit SwitchBufferUpdated(newBufferBps);

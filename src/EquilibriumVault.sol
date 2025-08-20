@@ -9,7 +9,6 @@ import {m_ybBTC} from "./m_ybBTC.sol";
 interface IStakingPool {
     function stake(uint256 amount) external;
     function withdraw(uint256 amount) external;
-    // --- AUDIT FIX: Added balanceOf to track vault's specific stake ---
     function balanceOf(address account) external view returns (uint256);
 }
 
@@ -44,7 +43,6 @@ contract EquilibriumVault is Ownable {
         M_YB_BTC = m_ybBTC(mYbBtcAddress);
     }
 
-    // --- AUDIT FIX: Corrected totalAssets to get vault's specific staked balance ---
     function totalAssets() public view returns (uint256) {
         uint256 stakedBalance = 0;
         if (ybStakingPool != address(0)) {
@@ -67,7 +65,6 @@ contract EquilibriumVault is Ownable {
     }
 
     function withdraw(uint256 mybbtcAmount) external {
-        // --- AUDIT FIX: Require vault to be unstaked for direct withdrawal ---
         require(!isStaked, "Vault is staked; use DEX for exit");
         if (mybbtcAmount == 0) revert ZeroAmount();
         uint256 totalShares = M_YB_BTC.totalSupply();
@@ -85,7 +82,6 @@ contract EquilibriumVault is Ownable {
 
         uint256 balance = YB_BTC.balanceOf(address(this));
         if (balance > 0) {
-            // --- AUDIT FIX: Reset approval to prevent misuse ---
             YB_BTC.approve(ybStakingPool, 0);
             YB_BTC.approve(ybStakingPool, balance);
             IStakingPool(ybStakingPool).stake(balance);
@@ -99,7 +95,6 @@ contract EquilibriumVault is Ownable {
         if (!isStaked) revert NotInState();
         if (ybStakingPool == address(0)) revert StakingPoolNotSet();
 
-        // --- AUDIT FIX: Get only the vault's specific staked balance ---
         uint256 stakedBalance = IStakingPool(ybStakingPool).balanceOf(address(this));
         if (stakedBalance > 0) {
             IStakingPool(ybStakingPool).withdraw(stakedBalance);
@@ -110,14 +105,12 @@ contract EquilibriumVault is Ownable {
     }
 
     function setStrategyManager(address newManager) external onlyOwner {
-        // --- AUDIT FIX: Add non-zero address check ---
         require(newManager != address(0), "Cannot set zero address");
         strategyManager = newManager;
         emit StrategyManagerUpdated(newManager);
     }
 
     function setStakingPool(address newPool) external onlyOwner {
-        // --- AUDIT FIX: Add non-zero address check ---
         require(newPool != address(0), "Cannot set zero address");
         ybStakingPool = newPool;
         emit StakingPoolUpdated(newPool);
