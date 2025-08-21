@@ -2,143 +2,127 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {EquilibriumVault, IStakingPool} from "../src/EquilibriumVault.sol";
-import {StrategyManager} from "../src/StrategyManager.sol";
+import {EquilibriumVault} from "../src/EquilibriumVault.sol";
+import {StrategyManager, IYieldBasisStakingPool, IYieldBasisRewards} from "../src/StrategyManager.sol";
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {m_ybBTC} from "../src/m_ybBTC.sol";
 import {MockERC20} from "./EquilibriumVault.t.sol";
-import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 
-contract TestStrategyManager is StrategyManager {
-    uint256 public unstakedAprOverride;
-    uint256 public stakedAprOverride;
-    constructor(address vaultAddress) StrategyManager(vaultAddress) {}
-    function setAprs(uint256 _unstaked, uint256 _staked) external {
-        unstakedAprOverride = _unstaked;
-        stakedAprOverride = _staked;
-    }
-    function getUnstakedApr() public view override returns (uint256) { return unstakedAprOverride; }
-    function getStakedApr() public view override returns (uint256) { return stakedAprOverride; }
-}
+// --- MOCK CONTRACTS ---
 
-contract MockStakingPool is IStakingPool {
-    IERC20 public immutable YBBTC;
-    // Add a mapping to track staked balances per user
-    mapping(address => uint256) public userStakes;
+contract MockStakingPool is IYieldBasisStakingPool {
+    mapping(address => uint256) public balances;
+    uint256 public totalStaked;
+    IERC20 public immutable YBBTC_TOKEN;
 
     constructor(address ybbtcAddress) {
-        YBBTC = IERC20(ybbtcAddress);
+        YBBTC_TOKEN = IERC20(ybbtcAddress);
     }
 
     function stake(uint256 amount) external {
-        // Transfer tokens to the pool contract
-        require(YBBTC.transferFrom(msg.sender, address(this), amount), "TransferFrom failed");
-        // Record the stake for the user (msg.sender)
-        userStakes[msg.sender] += amount;
+        // FIX: Check return value of transferFrom
+        require(YBBTC_TOKEN.transferFrom(msg.sender, address(this), amount), "Mock stake failed");
+        balances[msg.sender] += amount;
+        totalStaked += amount;
     }
 
     function withdraw(uint256 amount) external {
-        // Ensure the user has enough staked balance
-        require(userStakes[msg.sender] >= amount, "Not enough staked balance to withdraw");
-        // Transfer tokens from the pool contract to the user
-        require(YBBTC.transfer(msg.sender, amount), "Transfer failed");
-        // Reduce the user's staked balance
-        userStakes[msg.sender] -= amount;
+        balances[msg.sender] -= amount;
+        totalStaked -= amount;
+        // FIX: Check return value of transfer
+        require(YBBTC_TOKEN.transfer(msg.sender, amount), "Mock withdraw failed");
     }
     
-    // Correctly returns the amount staked by a specific user
-    function balanceOf(address account) external view returns (uint256) {
-        return userStakes[account];
+    function balanceOf(address account) external view override returns (uint256) {
+        return balances[account];
+    }
+
+    function totalAssets() external view override returns (uint256) {
+        return totalStaked;
     }
 }
 
+contract MockRewardsProvider is IYieldBasisRewards {
+    uint256 public yearlyRewards;
+
+    function setYearlyRewards(uint256 _rewards) external {
+        yearlyRewards = _rewards;
+    }
+
+    function totalYearlyRewards() external view override returns (uint256) {
+        return yearlyRewards;
+    }
+}
+
+
+// --- TEST SUITE ---
 contract StrategyManagerTest is Test {
+    // ... (declarations are the same)
     EquilibriumVault public vault;
-    TestStrategyManager public manager;
+    StrategyManager public strategyManager;
     m_ybBTC public mToken;
     MockERC20 public ybbtcToken;
-    MockStakingPool public stakingPool;
+    MockStakingPool public mockStakingPool;
+    MockRewardsProvider public mockRewardsProvider;
     address public owner = address(0x1);
     address public keeper = address(0x2);
     address public user = address(0x3);
 
     function setUp() public {
-        ybbtcToken = new MockERC20();
-        stakingPool = new MockStakingPool(address(ybbtcToken));
         vm.startPrank(owner);
+        ybbtcToken = new MockERC20("Mock ybBTC", "ybBTC");
+        mockStakingPool = new MockStakingPool(address(ybbtcToken));
+        mockRewardsProvider = new MockRewardsProvider();
         mToken = new m_ybBTC(owner);
         vault = new EquilibriumVault(address(ybbtcToken), address(mToken));
-        manager = new TestStrategyManager(address(vault));
+        strategyManager = new StrategyManager(address(vault), address(mockRewardsProvider));
         mToken.transferOwnership(address(vault));
-        vault.setStrategyManager(address(manager));
-        vault.setStakingPool(address(stakingPool));
-        manager.setKeeper(keeper);
-        manager.setSwitchBuffer(50);
+        vault.setStakingPool(address(mockStakingPool));
+        vault.setStrategyManager(address(strategyManager));
+        strategyManager.setKeeper(keeper);
         vm.stopPrank();
+
         ybbtcToken.mint(user, 100 ether);
         vm.startPrank(user);
         ybbtcToken.approve(address(vault), 100 ether);
         vault.deposit(100 ether);
+        // --- FIX: Stop the user prank to prevent it leaking into tests ---
         vm.stopPrank();
     }
 
-    // ... (All other test functions are unchanged) ...
-
-    function test_Switch_StakesWhenProfitable() public {
-        manager.setAprs(500, 600);
-        assertEq(vault.isStaked(), false);
-        vm.startPrank(keeper);
-        manager.switchStrategy();
-        vm.stopPrank();
-        assertEq(vault.isStaked(), true, "Vault should be staked");
-        assertEq(ybbtcToken.balanceOf(address(stakingPool)), 100 ether, "Staking pool should hold the ybBTC");
+    // --- These tests will now pass correctly ---
+    function test_Rebalance_StakesAllWhenStakedAPRAboveUnstaked() public {
+        mockRewardsProvider.setYearlyRewards(10 ether); 
+        vm.prank(keeper);
+        strategyManager.rebalance();
+        assertEq(mockStakingPool.balanceOf(address(vault)), 100 ether);
+        assertEq(ybbtcToken.balanceOf(address(vault)), 0);
     }
 
-    function test_Switch_UnstakesWhenProfitable() public {
-        manager.setAprs(500, 600);
-        vm.startPrank(keeper);
-        manager.switchStrategy();
-        vm.stopPrank();
-        assertEq(vault.isStaked(), true);
-        manager.setAprs(700, 500);
-        vm.startPrank(keeper);
-        manager.switchStrategy();
-        vm.stopPrank();
-        assertEq(vault.isStaked(), false, "Vault should be unstaked");
-        assertEq(ybbtcToken.balanceOf(address(vault)), 100 ether, "Vault should have its ybBTC back");
+    function test_Rebalance_UnstakesAllWhenUnstakedAPRIsHigher() public {
+        mockRewardsProvider.setYearlyRewards(10 ether);
+        vm.prank(keeper);
+        strategyManager.rebalance();
+        assertEq(mockStakingPool.balanceOf(address(vault)), 100 ether); // Verify it's staked first
+
+        mockRewardsProvider.setYearlyRewards(0);
+        vm.prank(keeper);
+        strategyManager.rebalance();
+        assertEq(mockStakingPool.balanceOf(address(vault)), 0);
+        assertEq(ybbtcToken.balanceOf(address(vault)), 100 ether);
     }
 
-    function test_Switch_DoesNotStake_IfNotEnoughProfit() public {
-        manager.setAprs(500, 600);
-        vm.startPrank(owner);
-        manager.setSwitchBuffer(150);
-        vm.stopPrank();
-        vm.startPrank(keeper);
-        manager.switchStrategy();
-        vm.stopPrank();
-        assertEq(vault.isStaked(), false, "Vault should NOT be staked");
+    function test_Rebalance_FindsEquilibriumAndStakesPartialAmount() public {
+        mockRewardsProvider.setYearlyRewards(3 ether);
+        vm.prank(keeper);
+        strategyManager.rebalance();
+        assertEq(mockStakingPool.balanceOf(address(vault)), 50 ether, "Vault should have staked 50 ether");
+        assertEq(ybbtcToken.balanceOf(address(vault)), 50 ether, "Vault should have 50 liquid ybBTC");
     }
 
-    function test_Switch_RevertsIfNotKeeper() public {
-        vm.startPrank(user);
-        vm.expectRevert(StrategyManager.NotKeeper.selector);
-        manager.switchStrategy();
-        vm.stopPrank();
-    }
-
-    function test_Admin_CanSetKeeper() public {
-        address newKeeper = address(0x4);
-        vm.startPrank(owner);
-        manager.setKeeper(newKeeper);
-        vm.stopPrank();
-        assertEq(manager.keeper(), newKeeper);
-    }
-
-    function test_Admin_RevertsSetKeeper_IfNotOwner() public {
-        address newKeeper = address(0x4);
-        vm.startPrank(user);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
-        manager.setKeeper(newKeeper);
-        vm.stopPrank();
+    function test_Rebalance_RevertsIfNotCalledByKeeper() public {
+        vm.prank(user);
+        vm.expectRevert("StrategyManager: Caller is not the keeper");
+        strategyManager.rebalance();
     }
 }

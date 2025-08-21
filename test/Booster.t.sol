@@ -20,14 +20,14 @@ contract BoosterTest is Test {
     function setUp() public {
         vm.startPrank(owner);
         eqmToken = new EQM();
-        mYBTC = new MockERC20();
+        mYBTC = new MockERC20("Mock Maximized ybBTC", "mYBTC");
         booster = new Booster(address(eqmToken), address(mYBTC));
         eqmToken.grantRole(eqmToken.MINTER_ROLE(), owner);
         vm.stopPrank();
 
         mYBTC.mint(user1, 1000 ether);
         mYBTC.mint(user2, 1000 ether);
-        externalToken = new MockERC20();
+        externalToken = new MockERC20("External Token", "EXT");
     }
 
     // --- Helper Functions ---

@@ -23,16 +23,15 @@ contract MockVotingEscrow is IVotingEscrow {
         lockedAmount += value;
         unlockTime = newUnlockTime;
         callCountCreateLock++;
-        IERC20(token).transferFrom(msg.sender, address(this), value);
+        require(IERC20(token).transferFrom(msg.sender, address(this), value));
     }
 
     function increaseAmount(uint256 value) external {
         lockedAmount += value;
         callCountIncreaseAmount++;
-        IERC20(token).transferFrom(msg.sender, address(this), value);
+        require(IERC20(token).transferFrom(msg.sender, address(this), value));
     }
 
-    // --- AUDIT FIX: Added the missing implementation for increaseUnlockTime ---
     function increaseUnlockTime(uint256 newUnlockTime) external {
         unlockTime = newUnlockTime;
         callCountIncreaseUnlockTime++;
@@ -48,7 +47,8 @@ contract YBLockerTest is Test {
 
     function setUp() public {
         vm.startPrank(owner);
-        ybToken = new MockERC20();
+        // --- FIX IS HERE ---
+        ybToken = new MockERC20("Mock YB Token", "YB");
         mYbToken = new m_YB(owner);
         votingEscrow = new MockVotingEscrow(address(ybToken));
         locker = new YBLocker(address(ybToken), address(votingEscrow), address(mYbToken));

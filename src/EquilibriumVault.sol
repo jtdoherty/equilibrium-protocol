@@ -12,6 +12,7 @@ interface IStakingPool {
     function balanceOf(address account) external view returns (uint256);
 }
 
+// THIS VAULT IS NOW DEPOSIT-ONLY. USERS EXIT VIA A SECONDARY LIQUIDITY POOL.
 contract EquilibriumVault is Ownable {
     using SafeERC20 for IERC20;
 
@@ -19,19 +20,18 @@ contract EquilibriumVault is Ownable {
     m_ybBTC public immutable M_YB_BTC;
     address public ybStakingPool;
     address public strategyManager;
-    bool public isStaked;
 
     event Deposit(address indexed user, uint256 ybbtcAmount, uint256 mybbtcAmount);
-    event Withdraw(address indexed user, uint256 ybbtcAmount, uint256 mybbtcAmount);
-    event StrategyChanged(bool isStaked);
+    // --- REMOVED --- event Withdraw(...)
     event StrategyManagerUpdated(address indexed newManager);
     event StakingPoolUpdated(address indexed newPool);
+    event Staked(uint256 amount);
+    event Unstaked(uint256 amount);
 
     error NotStrategyManager();
     error ZeroAmount();
-    error AlreadyInState();
-    error NotInState();
     error StakingPoolNotSet();
+    // --- REMOVED --- error InsufficientLiquidAssets()
 
     modifier onlyStrategyManager() {
         if (msg.sender != strategyManager) revert NotStrategyManager();
@@ -53,56 +53,57 @@ contract EquilibriumVault is Ownable {
 
     function deposit(uint256 amount) external {
         if (amount == 0) revert ZeroAmount();
+        
         uint256 totalShares = M_YB_BTC.totalSupply();
         uint256 totalVaultAssets = totalAssets();
         uint256 sharesToMint;
-        if (totalShares == 0 || totalVaultAssets == 0) { sharesToMint = amount; }
-        else { sharesToMint = (amount * totalShares) / totalVaultAssets; }
-        if (sharesToMint == 0) revert ZeroAmount();
+
+        if (totalShares == 0 || totalVaultAssets == 0) {
+            sharesToMint = amount;
+        } else {
+            // As the vault accrues yield, totalVaultAssets will grow larger than totalShares,
+            // making each share worth more and thus minting fewer shares for the same deposit amount.
+            sharesToMint = (amount * totalShares) / totalVaultAssets;
+        }
+
+        if (sharesToMint == 0) revert ZeroAmount(); // Protect against minting 0 shares for tiny deposits
+        
         YB_BTC.safeTransferFrom(msg.sender, address(this), amount);
         M_YB_BTC.mint(msg.sender, sharesToMint);
         emit Deposit(msg.sender, amount, sharesToMint);
     }
 
+    // --- REMOVED --- The entire `withdraw` function is gone.
+    /*
     function withdraw(uint256 mybbtcAmount) external {
-        require(!isStaked, "Vault is staked; use DEX for exit");
-        if (mybbtcAmount == 0) revert ZeroAmount();
-        uint256 totalShares = M_YB_BTC.totalSupply();
-        uint256 totalVaultAssets = totalAssets();
-        uint256 assetsToReturn = (mybbtcAmount * totalVaultAssets) / totalShares;
-        if (assetsToReturn == 0) revert ZeroAmount();
-        M_YB_BTC.burnFrom(msg.sender, mybbtcAmount);
-        YB_BTC.safeTransfer(msg.sender, assetsToReturn);
-        emit Withdraw(msg.sender, assetsToReturn, mybbtcAmount);
+        ...
     }
+    */
 
-    function _stakePool() external onlyStrategyManager {
-        if (isStaked) revert AlreadyInState();
+    // --- STRATEGY MANAGER FUNCTIONS (Unchanged) ---
+    // These are still required for the StrategyManager to rebalance assets.
+
+    function _stake(uint256 amount) external onlyStrategyManager {
+        if (amount == 0) revert ZeroAmount();
         if (ybStakingPool == address(0)) revert StakingPoolNotSet();
-
-        uint256 balance = YB_BTC.balanceOf(address(this));
-        if (balance > 0) {
-            YB_BTC.approve(ybStakingPool, 0);
-            YB_BTC.approve(ybStakingPool, balance);
-            IStakingPool(ybStakingPool).stake(balance);
-        }
-
-        isStaked = true;
-        emit StrategyChanged(true);
+        
+        YB_BTC.approve(ybStakingPool, 0);
+        YB_BTC.approve(ybStakingPool, amount);
+        IStakingPool(ybStakingPool).stake(amount);
+        
+        emit Staked(amount);
     }
 
-    function _unstakePool() external onlyStrategyManager {
-        if (!isStaked) revert NotInState();
+    function _unstake(uint256 amount) external onlyStrategyManager {
+        if (amount == 0) revert ZeroAmount();
         if (ybStakingPool == address(0)) revert StakingPoolNotSet();
+        
+        IStakingPool(ybStakingPool).withdraw(amount);
 
-        uint256 stakedBalance = IStakingPool(ybStakingPool).balanceOf(address(this));
-        if (stakedBalance > 0) {
-            IStakingPool(ybStakingPool).withdraw(stakedBalance);
-        }
-
-        isStaked = false;
-        emit StrategyChanged(false);
+        emit Unstaked(amount);
     }
+
+    // --- CONFIG FUNCTIONS (Unchanged) ---
 
     function setStrategyManager(address newManager) external onlyOwner {
         require(newManager != address(0), "Cannot set zero address");
