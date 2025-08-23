@@ -3,11 +3,22 @@
 pragma solidity ^0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
+// Mocks
 import {MockYBToken} from "../src/mocks/MockYBToken.sol";
-import {m_YB} from "../src/m_YB.sol"; // Adjusted path
 import {MockVotingEscrow} from "../src/mocks/MockVotingEscrow.sol";
-import {YBLocker} from "../src/YBLocker.sol"; // Adjusted path
-import {HarvestKeeper} from "../src/HarvestKeeper.sol"; // Adjusted path
+// Tokens
+import {m_YB} from "../src/m_YB.sol";
+import {m_ybBTC} from "../src/m_ybBTC.sol";
+import {EQM} from "../src/EQM.sol";
+// Core
+import {YBLocker} from "../src/YBLocker.sol";
+import {EquilibriumVault} from "../src/EquilibriumVault.sol";
+// Economics
+import {Booster} from "../src/Booster.sol";
+import {RewardDistributor} from "../src/RewardDistributor.sol";
+// Control
+import {HarvestKeeper} from "../src/HarvestKeeper.sol";
+
 
 contract DeployFlywheel is Script {
     function run() external returns (address keeperAddress) {
@@ -15,46 +26,55 @@ contract DeployFlywheel is Script {
         address deployer = vm.addr(deployerPrivateKey);
         vm.startBroadcast(deployerPrivateKey);
 
-        // --- DEPLOYMENT ---
-
-        console.log("1. Deploying Mocks...");
+        // --- 1. DEPLOYMENT ---
+        console.log("--- Deploying Contracts ---");
+        // Mocks (ybBTC is just another mock ERC20)
         MockYBToken ybToken = new MockYBToken();
+        MockYBToken ybBtcToken = new MockYBToken();
         MockVotingEscrow votingEscrow = new MockVotingEscrow(address(ybToken));
-        console.log("  - MockYBToken deployed to:", address(ybToken));
-        console.log("  - MockVotingEscrow deployed to:", address(votingEscrow));
-        
-        console.log("2. Deploying m_YB token with deployer as temporary owner...");
+
+        // Tokens
+        EQM eqmToken = new EQM(deployer);
+        m_ybBTC mYbBtcToken = new m_ybBTC(deployer);
         m_YB mYbToken = new m_YB(deployer);
-        console.log("  - m_YB token deployed to:", address(mYbToken));
 
-        console.log("3. Deploying YBLocker...");
+        // Core & Economics
+        EquilibriumVault vault = new EquilibriumVault(address(ybBtcToken), address(mYbBtcToken));
+        Booster booster = new Booster(address(mYbBtcToken));
+        // Note: Your RewardDistributor needs the EQM token address on creation
+        RewardDistributor rewardDistributor = new RewardDistributor(address(eqmToken)); 
         YBLocker ybLocker = new YBLocker(address(ybToken), address(votingEscrow), address(mYbToken));
-        console.log("  - YBLocker deployed to:", address(ybLocker));
 
-        // --- MODIFICATION FOR FAST TESTING ---
-        console.log("4. Deploying HarvestKeeper with a 1-minute interval...");
-        uint256 oneMinute = 60; // Set interval to 60 seconds
-        HarvestKeeper harvestKeeper = new HarvestKeeper(address(ybToken), address(ybLocker), oneMinute);
+        // Control
+        uint256 oneMinute = 60;
+        HarvestKeeper harvestKeeper = new HarvestKeeper(
+            address(ybToken),
+            address(ybBtcToken),
+            address(ybLocker),
+            address(vault),
+            address(rewardDistributor),
+            oneMinute
+        );
         keeperAddress = address(harvestKeeper);
-        console.log("  - HarvestKeeper deployed to:", keeperAddress);
         
-        // --- CONFIGURATION ---
-        console.log("--- Starting Configuration ---");
-
-        console.log("5. Transferring m_YB ownership to YBLocker...");
+        // --- 2. CONFIGURATION (The Ownership Dance) ---
+        console.log("--- Configuring Permissions ---");
+        // Give Vault permission to mint m_ybBTC
+        mYbBtcToken.transferOwnership(address(vault));
+        // Give YBLocker permission to mint m_YB
         mYbToken.transferOwnership(address(ybLocker));
-        console.log("  - Ownership transferred.");
-
-        console.log("6. Transferring YBLocker ownership to HarvestKeeper...");
+        // Give Booster permission to receive EQM
+        rewardDistributor.setBooster(address(booster));
+        // Give RewardDistributor permission to mint EQM
+        eqmToken.transferOwnership(address(rewardDistributor));
+        
+        // Give Keeper full control over other contracts
+        vault.transferOwnership(address(harvestKeeper));
         ybLocker.transferOwnership(address(harvestKeeper));
-        console.log("  - Ownership transferred.");
+        rewardDistributor.transferOwnership(address(harvestKeeper));
 
-        console.log("7. Minting 1000 YB to deployer %s", deployer);
-        uint256 initialMintAmount = 1000 ether;
-        ybToken.mint(deployer, initialMintAmount);
-
-        console.log("8. Approving HarvestKeeper to receive deployer's YB...");
-        ybToken.approve(address(harvestKeeper), initialMintAmount);
+        // --- 3. MINT MOCK TOKENS FOR TESTING ---
+        ybBtcToken.mint(deployer, 1000 ether);
         
         vm.stopBroadcast();
         return keeperAddress;
