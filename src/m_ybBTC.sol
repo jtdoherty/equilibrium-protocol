@@ -6,7 +6,7 @@ import "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 
 contract m_ybBTC is ERC20, Ownable {
     constructor(address initialOwner)
-        ERC20("Equilibrium ybBTC", "m-ybBTC")
+        ERC20("Maximized ybBTC", "m-ybBTC")
         Ownable(initialOwner)
     {}
 
