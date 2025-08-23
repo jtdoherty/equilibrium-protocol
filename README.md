@@ -41,3 +41,94 @@ Goal: Create a simple, intuitive interface that hides all the underlying complex
 Phase 5: Launch & Decentralization
 
 Goal: Ensure a secure launch and establish a clear path to community ownership. Process: Security: Complete multiple, independent smart contract audits. Launch a bug bounty program. Initial Setup: Deploy all contracts. Configure the StrategyManager. Set up the core team multi-signature wallet (e.g., 3-of-5 Gnosis Safe) as the owner of all contracts. Bootstrap Event: Launch the Booster contract to begin EQM emissions and attract the initial TVL. DAO Transition: Once the protocol is stable and EQM is sufficiently distributed, begin the process of transitioning ownership of the protocol contracts from the multi-sig to on-chain governance controlled by EQM token holders."
+
+
+
+
+
+
+
+
+
+
+
+
+______________________________________________________________________________________________________________________
+
+
+Perfect — this is exactly the fork-in-the-road question that determines whether your system becomes more like Convex (split incentives across both deposit lanes) or more like Yearn (all yield concentrated in the vault product). Let’s weigh the two designs carefully.
+
+⚖️ Design Choice: How to Distribute Harvested Rewards
+Option A: Concentrate Rewards into m-ybBTC (Yearn-style)
+
+All trading fees harvested from unstaked ybBTC → auto-compounded into the vault → increases m-ybBTC NAV.
+
+All YB emissions → locked in YBLocker → boosts vault APR (indirectly).
+
+EQM incentives → stakers of m-ybBTC in Booster.
+
+m-YB holders only get YieldBasis’s native veYB fee revenue (no direct slice of vault profits).
+
+✅ Pros
+
+Simplicity for users: BTC depositors are the clear winners; all yields concentrate into m-ybBTC.
+
+Clear narrative: “Deposit BTC → Get the highest, boosted yield in DeFi.”
+
+TVL magnet: Maximizes incentives for BTC liquidity (usually the hardest asset to attract).
+
+Less dilution: You don’t have to share yield with two groups (vault + lockers).
+
+❌ Cons
+
+Weaker YB aggregation: If m-YB doesn’t share in vault rewards, YB holders may prefer other yield sources for their tokens. You may struggle to attract YB into YBLocker.
+
+Slower veYB flywheel: Without a lot of m-YB minted, Equilibrium won’t absorb as much YB governance power → limits how much APR boost you can give vault depositors in the long run.
+
+Centralized dependence: Protocol becomes BTC-only centric, with less of the governance aggregator model that made Convex powerful.
+
+Option B: Split Rewards Between m-ybBTC and m-YB (Convex-style)
+
+Trading fees harvested → partly auto-compounded into m-ybBTC, partly sent to RewardDistributor for m-YB stakers.
+
+YB emissions → locked in YBLocker → veYB voting power boosts vault APR.
+
+EQM incentives → can go to both m-ybBTC and m-YB stakers, in different proportions.
+
+✅ Pros
+
+Dual incentives: Both BTC depositors and YB holders have strong reasons to use Equilibrium.
+
+Max YB absorption: By rewarding m-YB holders, you’ll lock a massive amount of YB → accumulate governance power faster.
+
+Flywheel strength: More veYB → higher vault APR → stronger reason for BTC users to deposit → bigger TVL → more YB emissions to lock.
+
+Convex-proven model: This is the design that helped Convex become dominant over Yearn in Curve governance.
+
+❌ Cons
+
+Dilution of vault yield: Some fees are siphoned away to m-YB holders instead of auto-compounding m-ybBTC. Vault APRs will look slightly lower compared to Option A.
+
+More complex UX: Users have to understand two tracks: “If I have BTC, deposit here. If I have YB, deposit here, and I get part of vault rewards + fees.”
+
+Liquidity bootstrapping needed: You must build deep m-YB/YB liquidity pools early or m-YB will trade at a heavy discount, discouraging YB deposits.
+
+🔑 Strategic Considerations
+
+If your primary goal is to capture BTC TVL quickly and become the #1 yield product for BTC → Option A (Yearn-style).
+
+If your primary goal is to become the governance aggregator of YieldBasis and build an unstoppable flywheel (like Convex did for Curve) → Option B (Convex-style).
+
+🏆 My Recommendation (Hybrid Approach)
+
+Launch with Option A (all rewards to m-ybBTC) to make the vault product extremely attractive at genesis. This keeps the UX simple and makes your “BTC supervault” the obvious place for ybBTC holders.
+
+Then, once you establish traction, transition to Option B by gradually routing a % of rewards to m-YB holders. You can even make this governance-controlled (EQM token holders vote what % of fees go to vault vs. lockers).
+
+This way:
+
+Early stage = hyper-focus on vault growth and TVL.
+
+Later stage = deepen governance moat by incentivizing YB lockers.
+
+EQM governance = decides the balance dynamically → aligning with whatever maximizes yield & protocol control.
