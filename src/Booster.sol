@@ -6,11 +6,17 @@ import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/security/Ree
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 
+/**
+ * @title Booster
+ * @author Equilibrium Protocol
+ * @notice This contract allows users to stake their m_ybBTC tokens to earn EQM rewards.
+ * The logic is based on the Synthetix StakingRewards contract, which is the industry standard.
+ */
 contract Booster is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // --- State Variables ---
-    IERC20 public immutable M_YB_BTC; // The token users stake (e.g., m_ybBTC)
+    IERC20 public immutable M_YB_BTC; // The token users stake
     IERC20 public immutable EQM;      // The token users earn as a reward
 
     // Reward calculation variables
@@ -68,6 +74,7 @@ contract Booster is Ownable, ReentrancyGuard {
 
     function withdraw(uint256 _amount) external nonReentrant updateReward(msg.sender) {
         require(_amount > 0, "Booster: Cannot withdraw 0");
+        require(balanceOf[msg.sender] >= _amount, "Booster: Insufficient staked balance");
         totalSupply -= _amount;
         balanceOf[msg.sender] -= _amount;
         M_YB_BTC.safeTransfer(msg.sender, _amount);
@@ -84,12 +91,24 @@ contract Booster is Ownable, ReentrancyGuard {
     }
 
     // --- Admin Functions ---
-    // This is the function called by RewardDistributor
+    /**
+     * @dev Called by the RewardDistributor to fund this contract with new EQM rewards.
+     * @param _reward The amount of EQM tokens being added.
+     * @param _duration The duration in seconds over which the new rewards should be distributed.
+     */
     function notifyRewardAmount(uint256 _reward, uint256 _duration) external onlyOwner updateReward(address(0)) {
         require(_duration > 0, "Booster: Duration must be > 0");
         require(_reward > 0, "Booster: Reward must be > 0");
-        
-        rewardRate = _reward / _duration;
+
+        // Calculate new reward rate based on the new reward and remaining time
+        if (block.timestamp >= lastUpdateTime + _duration) {
+            rewardRate = _reward / _duration;
+        } else {
+            uint256 remaining = lastUpdateTime + _duration - block.timestamp;
+            uint256 leftover = remaining * rewardRate;
+            rewardRate = (_reward + leftover) / _duration;
+        }
+
         lastUpdateTime = block.timestamp;
         emit RewardNotified(_reward, _duration);
     }
