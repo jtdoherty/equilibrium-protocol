@@ -28,4 +28,5 @@ interface IYieldBasisStaking {
      * @return The staked balance.
      */
     function balanceOf(address _account) external view returns (uint256);
+    function totalSupply() external view returns (uint256);
 }
