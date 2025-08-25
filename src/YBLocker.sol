@@ -3,10 +3,10 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
+import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IVotingEscrow} from "../interfaces/external/IVotingEscrow.sol";
-import {m_YB} from "../token/m_YB.sol";
+import {IVotingEscrow} from "./interfaces/external/IVotingEscrow.sol";
+import {m_YB} from "./m_YB.sol";
 
 contract YBLocker is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;

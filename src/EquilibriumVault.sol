@@ -4,10 +4,10 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
+import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
-import {m_ybBTC} from "../token/m_ybBTC.sol";
-import {IYieldBasisStaking} from "../interfaces/external/IYieldBasisStaking.sol";
+import {m_ybBTC} from "./m_ybBTC.sol";
+import {IYieldBasisStaking} from "./interfaces/external/IYieldBasisStaking.sol";
 
 /**
  * @title EquilibriumVault
