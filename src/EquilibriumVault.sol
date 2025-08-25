@@ -1,3 +1,4 @@
+// src/core/EquilibriumVault.sol
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -6,24 +7,29 @@ import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {m_ybBTC} from "../token/m_ybBTC.sol";
+import {IYieldBasisStaking} from "../interfaces/external/IYieldBasisStaking.sol";
 
-// Create this interface based on the REAL YieldBasis staking contract
-interface IYieldBasisStaking {
-    function stake(uint256 amount) external;
-    function withdraw(uint256 amount) external;
-}
-
+/**
+ * @title EquilibriumVault
+ * @author Equilibrium Protocol
+ * @notice The core vault for user deposits of ybBTC. It handles minting/burning of m_ybBTC
+ * based on a share price and executes strategy changes commanded by the StrategyManager.
+ */
 contract EquilibriumVault is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    // --- State Variables ---
     IERC20 public immutable YB_BTC;
     m_ybBTC public immutable M_YB_BTC;
     IYieldBasisStaking public immutable YB_STAKING_POOL;
+    
     address public strategyManager;
     bool public isStaked;
 
-    event Deposited(address indexed user, uint256 amount, uint256 shares);
-    event Withdrawn(address indexed user, uint256 amount, uint256 shares);
+    // --- Events ---
+    event Deposited(address indexed user, uint256 ybBtcAmount, uint256 mYbBtcShares);
+    event Withdrawn(address indexed user, uint256 ybBtcAmount, uint256 mYbBtcShares);
+    event StrategyChanged(bool isStaked);
 
     constructor(
         address _ybBtcAddress, 
@@ -37,60 +43,86 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
 
     // --- View Functions ---
     function totalAssets() public view returns (uint256) {
-        return YB_BTC.balanceOf(address(this));
+        // The total value is the liquid ybBTC in this contract plus any staked in YieldBasis
+        uint256 liquidAssets = YB_BTC.balanceOf(address(this));
+        uint256 stakedAssets = YB_STAKING_POOL.balanceOf(address(this));
+        return liquidAssets + stakedAssets;
     }
 
     // --- User-Facing Functions ---
     function deposit(uint256 _amount) external nonReentrant {
-        require(_amount > 0, "Cannot deposit 0");
-        uint256 shares;
-        if (M_YB_BTC.totalSupply() == 0) {
-            shares = _amount;
+        require(_amount > 0, "Vault: Cannot deposit 0");
+        uint256 currentTotalAssets = totalAssets();
+        uint256 currentTotalShares = M_YB_BTC.totalSupply();
+        
+        uint256 sharesToMint;
+        if (currentTotalShares == 0) {
+            sharesToMint = _amount;
         } else {
-            shares = (_amount * M_YB_BTC.totalSupply()) / totalAssets();
+            sharesToMint = (_amount * currentTotalShares) / currentTotalAssets;
         }
+
         YB_BTC.safeTransferFrom(msg.sender, address(this), _amount);
-        M_YB_BTC.mint(msg.sender, shares);
-        emit Deposited(msg.sender, _amount, shares);
+        // If the vault is staked, immediately stake the new deposit to match strategy
+        if (isStaked) {
+            YB_BTC.approve(address(YB_STAKING_POOL), _amount);
+            YB_STAKING_POOL.stake(_amount);
+        }
+
+        M_YB_BTC.mint(msg.sender, sharesToMint);
+        emit Deposited(msg.sender, _amount, sharesToMint);
     }
 
     function withdraw(uint256 _shares) external nonReentrant {
-        require(_shares > 0, "Cannot withdraw 0");
-        uint256 amount = (_shares * totalAssets()) / M_YB_BTC.totalSupply();
-        // This is a simplified withdraw; a real one needs to burn the shares.
-        // For now, this demonstrates the share calculation.
-        M_YB_BTC.transferFrom(msg.sender, address(this), _shares); // Placeholder for burn
-        YB_BTC.safeTransfer(msg.sender, amount);
-        emit Withdrawn(msg.sender, amount, _shares);
+        require(_shares > 0, "Vault: Cannot withdraw 0");
+        uint256 currentTotalAssets = totalAssets();
+        uint256 currentTotalShares = M_YB_BTC.totalSupply();
+
+        uint256 amountToWithdraw = (_shares * currentTotalAssets) / currentTotalShares;
+        require(amountToWithdraw > 0, "Vault: Amount to withdraw is 0");
+
+        // Burn the user's shares. Requires m_ybBTC to have a burnFrom function.
+        // M_YB_BTC.burnFrom(msg.sender, _shares); 
+
+        // Unstake if necessary to fulfill the withdrawal
+        if (YB_BTC.balanceOf(address(this)) < amountToWithdraw) {
+            uint256 needed = amountToWithdraw - YB_BTC.balanceOf(address(this));
+            YB_STAKING_POOL.withdraw(needed);
+        }
+
+        YB_BTC.safeTransfer(msg.sender, amountToWithdraw);
+        emit Withdrawn(msg.sender, amountToWithdraw, _shares);
     }
 
     // --- Strategy Functions (Manager Only) ---
-    function _stakePool() internal {
-        uint256 balance = totalAssets();
-        if (balance > 0) {
-            YB_BTC.approve(address(YB_STAKING_POOL), balance);
-            YB_STAKING_POOL.stake(balance);
-            isStaked = true;
-        }
-    }
+    function executeStrategyChange(bool _shouldBeStaked) external {
+        require(msg.sender == strategyManager, "Vault: Not the Strategy Manager");
+        if (_shouldBeStaked == isStaked) return; // No change needed
 
-    function _unstakePool() internal {
-        // You'll need to find the function in YieldBasis that returns the staked balance
-        uint256 stakedBalance = 0; // Replace with call to YieldBasis contract
-        if (stakedBalance > 0) {
-            YB_STAKING_POOL.withdraw(stakedBalance);
-            isStaked = false;
+        if (_shouldBeStaked) {
+            uint256 balance = YB_BTC.balanceOf(address(this));
+            if (balance > 0) {
+                YB_BTC.approve(address(YB_STAKING_POOL), balance);
+                YB_STAKING_POOL.stake(balance);
+            }
+        } else {
+            uint256 stakedBalance = YB_STAKING_POOL.balanceOf(address(this));
+            if (stakedBalance > 0) {
+                YB_STAKING_POOL.withdraw(stakedBalance);
+            }
         }
+        isStaked = _shouldBeStaked;
+        emit StrategyChanged(isStaked);
     }
-
+    
     // --- Admin Functions ---
     function setManager(address _manager) external onlyOwner {
         strategyManager = _manager;
     }
     
-    // Keeper calls this to add compounded fees
+    // Keeper calls this to add compounded fees from unstaked strategy
     function compound(uint256 _amount) external {
-        require(msg.sender == owner(), "Only owner"); // Owner is the keeper
+        require(msg.sender == owner(), "Vault: Not the owner (keeper)");
         YB_BTC.safeTransferFrom(msg.sender, address(this), _amount);
     }
 }
