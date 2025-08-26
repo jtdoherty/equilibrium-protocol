@@ -6,6 +6,7 @@ import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.so
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IEquilibriumVault, IYBLocker, IRewardDistributor, IStrategyManager} from "./interfaces/IProtocol.sol";
+import {ILiquidityGauge} from "./interfaces/external/ILiquidityGauge.sol";
 
 /**
  * @title HarvestKeeper
@@ -19,12 +20,13 @@ contract HarvestKeeper is KeeperCompatibleInterface, Ownable {
 
     // --- State Variables ---
     uint256 public immutable interval;
-    uint256 public lastTimeStamp;
+    uint256 public lastUpdateTime;
     
     // External protocol tokens
     IERC20 public immutable YB_TOKEN;
     IERC20 public immutable YB_BTC_TOKEN;
-    
+    ILiquidityGauge public immutable YB_STAKING_GAUGE;
+
     // Internal protocol contracts
     IEquilibriumVault public immutable VAULT;
     IYBLocker public immutable YB_LOCKER;
@@ -36,34 +38,42 @@ contract HarvestKeeper is KeeperCompatibleInterface, Ownable {
     constructor(
         address _ybToken,
         address _ybBtcToken,
+        address _ybStakingGauge,
         address _vault,
         address _ybLocker,
         address _rewardDistributor,
-        address _strategyManager,
+        address _strategyManager, // New parameter for StrategyManager
         uint256 _interval
     ) Ownable(msg.sender) {
         YB_TOKEN = IERC20(_ybToken);
         YB_BTC_TOKEN = IERC20(_ybBtcToken);
+        YB_STAKING_GAUGE = ILiquidityGauge(_ybStakingGauge);
         VAULT = IEquilibriumVault(_vault);
         YB_LOCKER = IYBLocker(_ybLocker);
         REWARD_DISTRIBUTOR = IRewardDistributor(_rewardDistributor);
-        STRATEGY_MANAGER = IStrategyManager(_strategyManager);
+        STRATEGY_MANAGER = IStrategyManager(_strategyManager); // Initialize StrategyManager
         interval = _interval;
-        lastTimeStamp = block.timestamp;
+        lastUpdateTime = block.timestamp;
     }
 
     // --- Chainlink Automation ---
     function checkUpkeep(bytes calldata) external view override returns (bool upkeepNeeded, bytes memory) {
-        upkeepNeeded = (block.timestamp - lastTimeStamp) > interval;
+        upkeepNeeded = (block.timestamp - lastUpdateTime) > interval;
         return (upkeepNeeded, "");
     }
 
     function performUpkeep(bytes calldata) external override {
-        if ((block.timestamp - lastTimeStamp) < interval) return;
-        lastTimeStamp = block.timestamp;
+        if ((block.timestamp - lastUpdateTime) < interval) return;
+        lastUpdateTime = block.timestamp;
 
         // --- THE ORCHESTRATION CHECKLIST ---
 
+        // 0. Claim YB emissions from the gauge (this is what generates the YB for our YBLocker)
+        // This also triggers internal checkpointing in the gauge.
+        // Use a low-level call to bypass the 'emit' keyword conflict.
+        (bool success, ) = address(YB_STAKING_GAUGE).call(abi.encodeWithSignature("emit()"));
+        require(success, "Call to emit() failed");
+        
         // 1. Trigger the "Brain" to optimize the vault's strategy
         STRATEGY_MANAGER.switchStrategy();
 
@@ -72,6 +82,7 @@ contract HarvestKeeper is KeeperCompatibleInterface, Ownable {
         if (ybBtcBalance > 0) {
             YB_BTC_TOKEN.approve(address(VAULT), ybBtcBalance);
             VAULT.compound(ybBtcBalance);
+            STRATEGY_MANAGER.updateFeeData(ybBtcBalance); // Crucial: Update fee data for StrategyManager
         }
 
         // 3. Harvest YB emissions and send to YBLocker

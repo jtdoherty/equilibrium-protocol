@@ -1,48 +1,64 @@
-// src/control/StrategyManager.sol
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
-import {IEquilibriumVault} from "./interfaces/IProtocol.sol";
-import {IYieldBasisStaking} from "./interfaces/external/IYieldBasisStaking.sol";
-import {IYieldBasisGauge} from "./interfaces/external/IYieldBasis.sol";
+import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IEquilibriumVault, IStrategyManager} from "./interfaces/IProtocol.sol"; // Import IStrategyManager for self-reference
+import {ILiquidityGauge} from "./interfaces/external/ILiquidityGauge.sol"; // Renamed from IYieldBasisStaking
+import {IGaugeController} from "./interfaces/external/IGaugeController.sol"; // Renamed from IYieldBasis
 import {IChainlinkPriceFeed} from "./interfaces/external/IChainlink.sol";
 
 /**
  * @title StrategyManager
  * @author Equilibrium Protocol
  * @notice The "brain" of the protocol. It calculates the optimal capital allocation
- * between staking and fee accrual and commands the EquilibriumVault to rebalance.
+ * between staking (YieldBasis Gauge) and fee accrual (liquid ybBTC) and commands
+ * the EquilibriumVault to rebalance accordingly.
+ * It accounts for reflexivity by considering its own stake in APY calculations.
  */
 contract StrategyManager is Ownable {
+    using SafeERC20 for IERC20;
+
     // --- State Variables ---
     IEquilibriumVault public immutable VAULT;
-    IYieldBasisStaking public immutable YB_STAKING_POOL;
-    IYieldBasisGauge public immutable YB_GAUGE;
-    IChainlinkPriceFeed public immutable YB_PRICE_FEED;
+    ILiquidityGauge public immutable YB_STAKING_GAUGE;
+    IGaugeController public immutable YB_GAUGE_CONTROLLER;
+    IChainlinkPriceFeed public immutable YB_PRICE_FEED; // For YB token price
 
-    // A rolling window of the last 7 days of unstaked fee revenue
-    uint256[7] public dailyFeeRevenue;
-    uint256 public feeDataIndex;
+    // Data for unstaked fee revenue (e.g., last 7 days)
+    uint256[7] public dailyUnstakedFeeRevenue;
+    uint256 public feeDataIndex; // Pointer to the current day in the circular buffer
+    uint256 public lastFeeDataUpdateTimestamp; // To track when the last daily update was
 
     // Configurable parameters for tuning the strategy
-    uint256 public rebalanceThreshold = 500; // 5% change required to rebalance (scaled by 10000)
+    uint256 public rebalanceThreshold = 500; // 5% change required to rebalance (scaled by 10000, 1% = 100)
     uint256 public constant ONE_YEAR_IN_SECONDS = 31536000;
+    uint256 public constant FEE_HISTORY_WINDOW_DAYS = 7; // Number of days for trailing average
+
+    // Current target allocation set by the manager (0-10000, e.g., 7500 = 75%)
+    uint256 public currentStakedAllocation = 0; 
 
     // --- Events ---
     event StrategyRebalanced(uint256 newStakedAllocation);
     event FeeDataUpdated(uint256 newFeeAmount);
+    event OptimalAllocationFound(uint256 optimalAllocation, uint256 currentStakedApy, uint256 currentUnstakedApy);
+
+    // --- Errors ---
+    error InvalidAllocation(int256 newAllocation);
+    error ZeroTotalAssets();
 
     constructor(
         address _vault,
-        address _ybStakingPool,
-        address _ybGauge,
+        address _ybStakingGauge,
+        address _ybGaugeController,
         address _ybPriceFeed
     ) Ownable(msg.sender) {
         VAULT = IEquilibriumVault(_vault);
-        YB_STAKING_POOL = IYieldBasisStaking(_ybStakingPool);
-        YB_GAUGE = IYieldBasisGauge(_ybGauge);
+        YB_STAKING_GAUGE = ILiquidityGauge(_ybStakingGauge);
+        YB_GAUGE_CONTROLLER = IGaugeController(_ybGaugeController);
         YB_PRICE_FEED = IChainlinkPriceFeed(_ybPriceFeed);
+        lastFeeDataUpdateTimestamp = block.timestamp; // Initialize
     }
 
     // --- Core Logic ---
@@ -52,89 +68,145 @@ contract StrategyManager is Ownable {
      * It calculates the optimal allocation and rebalances the vault if necessary.
      */
     function switchStrategy() external onlyOwner {
-        (uint256 currentStaked, uint256 currentUnstaked) = VAULT.getAssetBalances(); // Assumes Vault has this new function
-        uint256 totalAssets = currentStaked + currentUnstaked;
-        if (totalAssets == 0) return;
+        uint256 totalAssets = VAULT.totalAssets();
+        if (totalAssets == 0) revert ZeroTotalAssets();
 
-        uint256 currentAllocation = (currentStaked * 10000) / totalAssets;
+        // Calculate the optimal allocation based on current market data and reflexivity
         uint256 optimalAllocation = findOptimalAllocation(totalAssets);
 
+        // Get the APYs to include in the event log
+        uint256 unstakedApy = getUnstakedAPY();
+        uint256 totalStakedInGaugeByOthers = YB_STAKING_GAUGE.balanceOf(address(0)); 
+        uint256 stakedApyAtOptimal = getStakedAPY(totalStakedInGaugeByOthers + (totalAssets * optimalAllocation) / 10000);
+
         // Check if the change is significant enough to warrant a rebalance
-        if ((optimalAllocation > currentAllocation && optimalAllocation - currentAllocation > rebalanceThreshold) ||
-            (currentAllocation > optimalAllocation && currentAllocation - optimalAllocation > rebalanceThreshold)) {
+        // currentStakedAllocation is scaled by 10000 (100% = 10000)
+        if ((optimalAllocation > currentStakedAllocation && optimalAllocation - currentStakedAllocation > rebalanceThreshold) ||
+            (currentStakedAllocation > optimalAllocation && currentStakedAllocation - optimalAllocation > rebalanceThreshold)) {
             
-            VAULT.rebalance(int256(optimalAllocation) - int256(currentAllocation)); // Assumes Vault has a rebalance function
+            // Calculate the percentage change needed by the vault
+            int256 percentageChange = int256(optimalAllocation) - int256(currentStakedAllocation);
+            VAULT.rebalance(percentageChange); 
+            currentStakedAllocation = optimalAllocation; // Update manager's state
+            
             emit StrategyRebalanced(optimalAllocation);
         }
+
+        // Emit the OptimalAllocationFound event here, where it is safe
+        emit OptimalAllocationFound(optimalAllocation, stakedApyAtOptimal, unstakedApy);
     }
 
     /**
-     * @notice Calculates the ideal percentage of assets that should be staked.
+     * @notice Calculates the ideal percentage of assets that should be staked to maximize overall APY.
+     * This involves an iterative search to find the point where marginal staked APY equals unstaked APY.
+     * @param _totalVaultAssets Total ybBTC held by the EquilibriumVault.
+     * @return The optimal percentage of assets to stake, scaled by 10000 (e.g., 7500 for 75%).
      */
-    function findOptimalAllocation(uint256 _totalAssets) public view returns (uint256) {
-        // This is a simplified search. A production version might use a more advanced algorithm.
-        // We find the point where the marginal APY of staking equals the APY of not staking.
-        uint256 unstakedApy = getUnstakedAPY();
-        uint256 totalStakedByOthers = YB_STAKING_POOL.totalSupply() - VAULT.stakedBalance();
+    function findOptimalAllocation(uint256 _totalVaultAssets) public view returns (uint256) {
+        if (_totalVaultAssets == 0) return 0;
 
-        // Iteratively find the equilibrium point (binary search would be more gas efficient)
+        uint256 unstakedApy = getUnstakedAPY();
+        // Total staked in the YieldBasis gauge by everyone else *before* our potential stake
+        uint256 totalStakedInGaugeByOthers = YB_STAKING_GAUGE.balanceOf(address(0)); // This is a mock function, need to adjust with real YieldBasis API.
+                                                                                // Ideally, we'd query total supply of LP token in the Gauge, then subtract our own.
+
+        uint256 bestAllocation = 0;
+        uint256 maxAPY = 0; // Or a very low value
+
+        // Iterate through possible allocations (0% to 100% in 1% increments)
+        // A binary search could be more gas efficient for fine-grained search.
         for (uint256 i = 0; i <= 100; i++) {
-            uint256 ourStake = (_totalAssets * i) / 100;
-            uint256 totalHypotheticalStake = totalStakedByOthers + ourStake;
-            uint256 stakedApy = getStakedAPY(totalHypotheticalStake);
-            if (stakedApy <= unstakedApy) {
-                return i * 100; // Return percentage scaled by 10000
+            uint256 ourHypotheticalStake = (_totalVaultAssets * i) / 100;
+            uint256 totalHypotheticalStakeInGauge = totalStakedInGaugeByOthers + ourHypotheticalStake;
+
+            uint256 stakedApy = getStakedAPY(totalHypotheticalStakeInGauge);
+
+            // Calculate the blended APY for the vault's total assets
+            uint256 blendedApy = ((ourHypotheticalStake * stakedApy) + ((_totalVaultAssets - ourHypotheticalStake) * unstakedApy)) / _totalVaultAssets;
+
+            if (blendedApy > maxAPY) {
+                maxAPY = blendedApy;
+                bestAllocation = i * 100; // Store as 0-10000 scale
             }
         }
-        return 10000; // If staking is always better, stake 100%
+        return bestAllocation;
     }
 
     // --- APY Calculation Helpers ---
 
+    /**
+     * @notice Calculates the approximate Annual Percentage Yield (APY) for staking in the YieldBasis gauge.
+     * @dev Accounts for dilution by considering the total hypothetical amount staked in the gauge.
+     * @param _totalStakedAssets The total amount of ybBTC hypothetically staked in the gauge (including Equilibrium's share).
+     * @return The estimated Staked APY, scaled by 1e18 (for precision).
+     */
     function getStakedAPY(uint256 _totalStakedAssets) public view returns (uint256) {
-        if (_totalStakedAssets == 0) return type(uint256).max;
+        if (_totalStakedAssets == 0) return 0; // Or handle as an error if this state is impossible
 
-        // 1. Get YB emission rate from the gauge
-        uint256 emissionsPerSecond = YB_GAUGE.inflation_rate();
-        uint256 emissionsPerYear = emissionsPerSecond * ONE_YEAR_IN_SECONDS;
+        // 1. Get YB emission rate (global for now, will be per gauge via controller)
+        // Assuming YB_GAUGE_CONTROLLER.TOKEN() returns the YB token and it has an inflation_rate()
+        // If not, this needs to be adjusted based on the actual YieldBasis API.
+        uint256 globalYBInflationRate = IERC20(YB_GAUGE_CONTROLLER.TOKEN()).balanceOf(address(YB_GAUGE_CONTROLLER)); // Placeholder
+                                         // A real gauge controller would have a function like `gauge_emissions_per_second()`
+        uint256 emissionsPerYear = globalYBInflationRate * ONE_YEAR_IN_SECONDS; // Placeholder for actual emissions logic
 
         // 2. Get the price of YB from Chainlink
         (, int256 price, , , ) = YB_PRICE_FEED.latestRoundData();
-        // Assume price feed has 8 decimals, convert to 18
-        uint256 ybPrice = uint256(price) * 1e10; 
+        require(price > 0, "Strategy: YB Price must be positive");
+        uint256 ybPrice = uint256(price) * 1e10; // Chainlink typically 8 decimals, convert to 18
 
         // 3. Calculate total value of yearly emissions
-        uint256 yearlyRewardValue = (emissionsPerYear * ybPrice) / 1e18;
+        uint256 yearlyRewardValue = (emissionsPerYear * ybPrice) / 1e18; // Value of YB rewards in USD (or base currency)
         
-        // APY = (Yearly Reward Value / Total Value Staked) * 100
-        // Assume ybBTC has a price of 1 USD for simplicity
-        return (yearlyRewardValue * 100) / _totalStakedAssets;
+        // APY = (Yearly Reward Value / Total Value Staked) * 100 (scaled by 1e18)
+        // Assume ybBTC has a price of 1 USD for simplicity for APY calculation base
+        return (yearlyRewardValue * 1e18) / _totalStakedAssets; // Return scaled APY
     }
 
+    /**
+     * @notice Calculates the approximate Annual Percentage Yield (APY) for holding unstaked ybBTC (from trading fees).
+     * @return The estimated Unstaked APY, scaled by 1e18 (for precision).
+     */
     function getUnstakedAPY() public view returns (uint256) {
-        uint256 totalWeeklyFees = 0;
-        for (uint i = 0; i < 7; i++) {
-            totalWeeklyFees += dailyFeeRevenue[i];
+        uint256 totalFeeRevenueInWindow = 0;
+        for (uint i = 0; i < FEE_HISTORY_WINDOW_DAYS; i++) {
+            totalFeeRevenueInWindow += dailyUnstakedFeeRevenue[i];
         }
-        uint256 yearlyFees = totalWeeklyFees * 52;
+        
+        // If the fee data is stale, extrapolate or use zero
+        // For simplicity, let's just use the current average rate if not updated daily.
         uint256 totalAssets = VAULT.totalAssets();
-        if (totalAssets == 0) return 0;
-        // APY = (Yearly Fees / Total Assets) * 100
-        return (yearlyFees * 100) / totalAssets;
+        if (totalAssets == 0 || totalFeeRevenueInWindow == 0) return 0;
+
+        uint256 averageDailyFees = totalFeeRevenueInWindow / FEE_HISTORY_WINDOW_DAYS;
+        uint256 yearlyFees = averageDailyFees * 365;
+
+        // APY = (Yearly Fees / Total Assets) * 100 (scaled by 1e18)
+        return (yearlyFees * 1e18) / totalAssets; // Return scaled APY
     }
 
     // --- Admin Functions ---
 
     /**
-     * @notice Called by the keeper to update the daily fee revenue data.
+     * @notice Called by the HarvestKeeper to provide new daily fee revenue data for unstaked ybBTC.
+     * This is crucial for calculating the unstaked APY.
+     * @param _newFeeAmount The amount of ybBTC earned as fees in the last day/period.
      */
     function updateFeeData(uint256 _newFeeAmount) external onlyOwner {
-        dailyFeeRevenue[feeDataIndex] = _newFeeAmount;
-        feeDataIndex = (feeDataIndex + 1) % 7; // Move to the next day, wrapping around
+        // Ensure this is called roughly daily
+        // require(block.timestamp >= lastFeeDataUpdateTimestamp + 1 days, "Strategy: Not yet time to update fee data");
+        dailyUnstakedFeeRevenue[feeDataIndex] = _newFeeAmount;
+        feeDataIndex = (feeDataIndex + 1) % FEE_HISTORY_WINDOW_DAYS; // Move to the next day in the circular buffer
+        lastFeeDataUpdateTimestamp = block.timestamp;
         emit FeeDataUpdated(_newFeeAmount);
     }
 
+    /**
+     * @notice Sets the threshold for how much the optimal allocation must change to trigger a rebalance.
+     * @param _newThreshold The new threshold, scaled by 10000 (e.g., 100 = 1%).
+     */
     function setRebalanceThreshold(uint256 _newThreshold) external onlyOwner {
+        require(_newThreshold <= 10000, "Strategy: Threshold cannot exceed 100%");
         rebalanceThreshold = _newThreshold;
     }
 }

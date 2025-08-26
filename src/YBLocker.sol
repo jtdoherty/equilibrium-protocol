@@ -55,7 +55,7 @@ contract YBLocker is Ownable, ReentrancyGuard {
             emit Locked(balance, unlockTime);
         } else {
             // Otherwise, add to the existing lock
-            VOTING_ESCROW.increase_amount(balance);
+            VOTING_ESCROW.increase_amount(balance, address(this));
             emit Relocked(balance);
         }
 
