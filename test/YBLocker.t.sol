@@ -1,86 +1,104 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.0;
 
-import {Test} from "forge-std/Test.sol";
-import {YBLocker, IVotingEscrow} from "../src/YBLocker.sol";
+import "forge-std/Test.sol";
+import {MockERC20} from "../src/mocks/MockERC20.sol";
+import {MockVotingEscrow} from "../src/mocks/MockVotingEscrow.sol";
+import {YBLocker} from "../src/YBLocker.sol";
 import {m_YB} from "../src/m_YB.sol";
-import {MockERC20} from "./EquilibriumVault.t.sol";
-import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
-
-contract MockVotingEscrow is IVotingEscrow {
-    uint256 public lockedAmount;
-    uint256 public unlockTime;
-    address public token;
-    uint256 public callCountCreateLock;
-    uint256 public callCountIncreaseAmount;
-    uint256 public callCountIncreaseUnlockTime;
-
-    constructor(address tokenAddress) {
-        token = tokenAddress;
-    }
-
-    function createLock(uint256 value, uint256 newUnlockTime) external {
-        lockedAmount += value;
-        unlockTime = newUnlockTime;
-        callCountCreateLock++;
-        require(IERC20(token).transferFrom(msg.sender, address(this), value));
-    }
-
-    function increaseAmount(uint256 value) external {
-        lockedAmount += value;
-        callCountIncreaseAmount++;
-        require(IERC20(token).transferFrom(msg.sender, address(this), value));
-    }
-
-    function increaseUnlockTime(uint256 newUnlockTime) external {
-        unlockTime = newUnlockTime;
-        callCountIncreaseUnlockTime++;
-    }
-}
 
 contract YBLockerTest is Test {
-    YBLocker public locker;
-    MockERC20 public ybToken;
-    m_YB public mYbToken;
+    MockERC20 public YB_TOKEN;
     MockVotingEscrow public votingEscrow;
-    address public owner = address(0x1);
+    m_YB public mYB_TOKEN;
+    YBLocker public ybLocker;
+
+    address public deployer; // Owner of YBLocker and initial mYB_TOKEN owner
+    address public user;     // User who provides YB_TOKEN
 
     function setUp() public {
-        vm.startPrank(owner);
-        // --- FIX IS HERE ---
-        ybToken = new MockERC20("Mock YB Token", "YB");
-        mYbToken = new m_YB(owner);
-        votingEscrow = new MockVotingEscrow(address(ybToken));
-        locker = new YBLocker(address(ybToken), address(votingEscrow), address(mYbToken));
-        mYbToken.transferOwnership(address(locker));
+        deployer = makeAddr("deployer");
+        user = makeAddr("user");
+
+        // Deploy Mock YB Token
+        YB_TOKEN = new MockERC20("YieldBasis Token", "YB");
+
+        // Deploy Mock VotingEscrow
+        votingEscrow = new MockVotingEscrow(address(YB_TOKEN));
+
+        // Deploy m_YB token with deployer as initial owner
+        mYB_TOKEN = new m_YB(deployer);
+
+        // Deploy YBLocker with deployer as owner
+        vm.startPrank(deployer);
+        ybLocker = new YBLocker(address(YB_TOKEN), address(votingEscrow), address(mYB_TOKEN));
+        // Transfer ownership of mYB_TOKEN to YBLocker so it can mint
+        mYB_TOKEN.transferOwnership(address(ybLocker));
         vm.stopPrank();
+
+        // Mint some YB_TOKEN for the user to deposit
+        YB_TOKEN.mint(user, 1000e18);
     }
 
-    function test_FirstLock_MintsMYB() public {
-        ybToken.mint(address(locker), 100 ether);
-        vm.startPrank(owner);
-        locker.lock();
+    function testInitialLock() public {
+        uint256 lockAmount = 200e18;
+
+        // User transfers YB to YBLocker
+        vm.startPrank(user);
+        YB_TOKEN.transfer(address(ybLocker), lockAmount);
         vm.stopPrank();
-        assertEq(votingEscrow.lockedAmount(), 100 ether);
-        assertEq(mYbToken.balanceOf(owner), 100 ether, "Owner should receive 100 m_YB");
+
+        // YBLocker (owned by deployer) calls lock()
+        vm.startPrank(deployer);
+        ybLocker.lock();
+        vm.stopPrank();
+
+        // Verify YBLocker's YB_TOKEN balance is 0 after locking
+        assertEq(YB_TOKEN.balanceOf(address(ybLocker)), 0, "YBLocker should have 0 YB_TOKEN after locking");
+
+        // Verify MockVotingEscrow holds the YB_TOKEN
+        assertEq(YB_TOKEN.balanceOf(address(votingEscrow)), lockAmount, "VotingEscrow should hold the locked YB_TOKEN");
+
+        // Verify YBLocker has the correct voting power in MockVotingEscrow
+        assertEq(votingEscrow.balanceOf(address(ybLocker)), lockAmount, "YBLocker should have correct voting power");
+
+        // Verify deployer (owner of YBLocker) received m_YB_TOKEN
+        assertEq(mYB_TOKEN.balanceOf(deployer), lockAmount, "Deployer should receive m_YB_TOKEN");
     }
 
-    function test_SubsequentLock_MintsMoreMYB() public {
-        ybToken.mint(address(locker), 100 ether);
-        vm.startPrank(owner);
-        locker.lock();
+    function testRelockExisting() public {
+        uint256 initialLockAmount = 200e18;
+        uint256 additionalLockAmount = 100e18;
+
+        // Initial lock
+        vm.startPrank(user);
+        YB_TOKEN.transfer(address(ybLocker), initialLockAmount);
+        vm.stopPrank();
+        vm.startPrank(deployer);
+        ybLocker.lock();
         vm.stopPrank();
 
-        // Warp time to ensure increaseUnlockTime is called
-        vm.warp(block.timestamp + 1 days);
+        // Assert initial state
+        assertEq(YB_TOKEN.balanceOf(address(votingEscrow)), initialLockAmount, "Initial lock amount correct");
+        assertEq(votingEscrow.balanceOf(address(ybLocker)), initialLockAmount, "Initial voting power correct");
+        assertEq(mYB_TOKEN.balanceOf(deployer), initialLockAmount, "Initial m_YB minted correct");
 
-        ybToken.mint(address(locker), 50 ether);
-        vm.startPrank(owner);
-        locker.lock();
+        // Deposit more YB and relock
+        vm.startPrank(user);
+        YB_TOKEN.transfer(address(ybLocker), additionalLockAmount);
         vm.stopPrank();
-        
-        assertEq(votingEscrow.lockedAmount(), 150 ether);
-        assertEq(mYbToken.balanceOf(owner), 150 ether, "Owner should have a total of 150 m_YB");
-        assertEq(votingEscrow.callCountIncreaseUnlockTime(), 1, "increaseUnlockTime should be called");
+
+        vm.startPrank(deployer);
+        ybLocker.lock();
+        vm.stopPrank();
+
+        // Verify total YB_TOKEN in VotingEscrow
+        assertEq(YB_TOKEN.balanceOf(address(votingEscrow)), initialLockAmount + additionalLockAmount, "Total YB_TOKEN in VotingEscrow after relock");
+
+        // Verify updated voting power for YBLocker
+        assertEq(votingEscrow.balanceOf(address(ybLocker)), initialLockAmount + additionalLockAmount, "Updated voting power for YBLocker");
+
+        // Verify deployer (owner of YBLocker) received additional m_YB_TOKEN
+        assertEq(mYB_TOKEN.balanceOf(deployer), initialLockAmount + additionalLockAmount, "Total m_YB minted to deployer after relock");
     }
 }

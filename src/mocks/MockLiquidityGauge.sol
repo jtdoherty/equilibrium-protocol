@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
+import "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
+import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol"; // Added SafeERC20
 
 /**
  * @title MockLiquidityGauge
@@ -10,10 +12,12 @@ import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
  * It allows users to deposit a token (ybBTC) and claim rewards in another token (YB).
  */
 contract MockLiquidityGauge {
+    using SafeERC20 for IERC20; // Use SafeERC20
+
     IERC20 public immutable stakingToken; // The token to be staked (ybBTC)
     IERC20 public immutable rewardToken;  // The reward token (YB)
 
-    mapping(address => uint256) public balances;
+    mapping(address => uint256) public balances; // Maps receiver to staked balance
     mapping(address => uint256) public claimable_rewards;
 
     constructor(address _stakingToken, address _rewardToken) {
@@ -21,29 +25,38 @@ contract MockLiquidityGauge {
         rewardToken = IERC20(_rewardToken);
     }
 
-    function deposit(uint256 _amount) external {
-        require(_amount > 0, "Cannot deposit 0");
-        balances[msg.sender] += _amount;
-        stakingToken.transferFrom(msg.sender, address(this), _amount);
+    // Matches ILiquidityGauge.deposit(uint256 assets, address receiver)
+    function deposit(uint256 _assets, address _receiver) external returns (uint256) {
+        require(_assets > 0, "Cannot deposit 0");
+        stakingToken.safeTransferFrom(msg.sender, address(this), _assets); // Transfer from msg.sender to gauge
+        balances[_receiver] += _assets; // Update receiver's balance in gauge
+        return _assets; // Return shares (1:1 for simplicity)
     }
 
-    function withdraw(uint256 _amount) external {
-        require(_amount > 0, "Cannot withdraw 0");
-        balances[msg.sender] -= _amount;
-        stakingToken.transfer(msg.sender, _amount);
+    // Matches ILiquidityGauge.withdraw(uint256 assets, address receiver, address owner)
+    function withdraw(uint256 _assets, address _receiver, address _owner) external returns (uint256) {
+        require(_assets > 0, "Cannot withdraw 0");
+        require(balances[_owner] >= _assets, "Insufficient staked balance");
+        balances[_owner] -= _assets; // Decrease owner's balance in gauge
+        stakingToken.safeTransfer(_receiver, _assets); // Transfer to receiver
+        return _assets; // Return shares (1:1 for simplicity)
     }
 
-    function claim(address _recipient) external returns (uint256) {
-        uint256 rewards = claimable_rewards[msg.sender];
+    function claim(IERC20 _reward, address _user) external returns (uint256) {
+        uint256 rewards = claimable_rewards[_user];
         if (rewards > 0) {
-            claimable_rewards[msg.sender] = 0;
-            rewardToken.transfer(_recipient, rewards);
+            claimable_rewards[_user] = 0;
+            _reward.safeTransfer(_user, rewards);
         }
         return rewards;
     }
 
-    function balanceOf(address _user) external view returns (uint256) {
-        return balances[_user];
+    function balanceOf(address _account) external view returns (uint256) {
+        return balances[_account];
+    }
+
+    function lp_token() external view returns (address) {
+        return address(stakingToken);
     }
 
     /**
@@ -54,10 +67,4 @@ contract MockLiquidityGauge {
     function setRewards(address _user, uint256 _amount) external {
         claimable_rewards[_user] = _amount;
     }
-}
-
-// Minimal interface needed for mocks to interact with ERC20 tokens
-interface IERC20 {
-    function transferFrom(address from, address to, uint256 amount) external returns (bool);
-    function transfer(address to, uint256 amount) external returns (bool);
 }

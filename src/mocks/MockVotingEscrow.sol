@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
+import "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
+import "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol"; // Added IERC20 import
 
 /**
  * @title MockVotingEscrow
@@ -25,6 +26,23 @@ contract MockVotingEscrow {
         require(_value > 0, "Cannot lock 0");
         stakingToken.transferFrom(msg.sender, address(this), _value);
         lockedBalances[msg.sender] += _value;
+    }
+
+    /**
+     * @notice Mocks increasing the amount in an existing lock.
+     */
+    function increase_amount(uint256 _value, address /*_addr*/) external {
+        require(_value > 0, "Cannot add 0");
+        stakingToken.transferFrom(msg.sender, address(this), _value);
+        lockedBalances[msg.sender] += _value; // Add to existing lock
+    }
+
+    /**
+     * @notice Mocks increasing the unlock time. For this mock, it does nothing as we don't track unlock times in detail.
+     */
+    function increase_unlock_time(uint256 /*_new_unlock_time*/) external {
+        // In a real scenario, this would update the unlock time.
+        // For this mock, we'll just let it pass without specific logic.
     }
 
     /**

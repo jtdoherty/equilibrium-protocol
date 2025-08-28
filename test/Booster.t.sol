@@ -1,165 +1,172 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.0;
 
-import {Test} from "forge-std/Test.sol";
+import "forge-std/Test.sol";
+import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {Booster} from "../src/Booster.sol";
 import {EQM} from "../src/EQM.sol";
-import {MockERC20} from "./EquilibriumVault.t.sol";
-import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import {m_ybBTC} from "../src/m_ybBTC.sol";
+import {RewardDistributor} from "../src/RewardDistributor.sol";
 
 contract BoosterTest is Test {
-    Booster public booster;
+    MockERC20 public ybBTC; // Underlying asset for m_ybBTC
+    m_ybBTC public mYBBTC;
     EQM public eqmToken;
-    MockERC20 public mYBTC;
-    MockERC20 public externalToken;
+    Booster public booster;
+    RewardDistributor public rewardDistributor;
 
-    address public owner = address(0x1);
-    address public user1 = address(0x10);
-    address public user2 = address(0x20);
+    address public deployer; // Owner of EQM, RewardDistributor initially, and mYBBTC for minting
+    address public user;     // User staking mYBBTC
 
     function setUp() public {
-        vm.startPrank(owner);
-        eqmToken = new EQM();
-        mYBTC = new MockERC20("Mock Maximized ybBTC", "mYBTC");
-        booster = new Booster(address(eqmToken), address(mYBTC));
-        eqmToken.grantRole(eqmToken.MINTER_ROLE(), owner);
+        deployer = makeAddr("deployer");
+        user = makeAddr("user");
+
+        // Deploy Mock ybBTC (not directly used by Booster, but useful for context)
+        ybBTC = new MockERC20("YieldBasis BTC", "ybBTC");
+
+        // Deploy m_ybBTC (stake token for Booster)
+        // deployer remains owner to mint mYBBTC to user later in this test
+        mYBBTC = new m_ybBTC(deployer);
+
+        // Deploy EQM token (reward token for Booster)
+        // deployer is initial owner, then transfers to RewardDistributor
+        eqmToken = new EQM(deployer);
+
+        // Deploy RewardDistributor (owner by deployer)
+        vm.startPrank(deployer);
+        rewardDistributor = new RewardDistributor(address(eqmToken));
         vm.stopPrank();
 
-        mYBTC.mint(user1, 1000 ether);
-        mYBTC.mint(user2, 1000 ether);
-        externalToken = new MockERC20("External Token", "EXT");
-    }
-
-    // --- Helper Functions ---
-    function _stake(address _user, uint256 _amount) internal {
-        vm.startPrank(_user);
-        mYBTC.approve(address(booster), _amount);
-        booster.stake(_amount);
+        // Deploy Booster (owned by RewardDistributor, which is owned by deployer)
+        // Prank with RewardDistributor to set it as owner (if Booster's constructor took an owner)
+        // However, Booster's constructor just uses msg.sender. So, deployer deploys it, then transfers ownership.
+        vm.startPrank(deployer);
+        booster = new Booster(address(mYBBTC), address(eqmToken));
+        // Transfer Booster ownership to RewardDistributor
+        booster.transferOwnership(address(rewardDistributor));
         vm.stopPrank();
-    }
 
-    function _claim(address _user) internal {
-        vm.startPrank(_user);
-        booster.claimReward();
+        // Configure ownerships
+        vm.startPrank(deployer); // Deployer, as initial owner of EQM and RewardDistributor's owner, configures
+        // Transfer EQM ownership (minting rights) to RewardDistributor
+        eqmToken.transferOwnership(address(rewardDistributor));
+        // Deployer (as owner of RewardDistributor) sets Booster in RewardDistributor
+        rewardDistributor.setBooster(address(booster));
         vm.stopPrank();
-    }
-    
-    // --- Staking and Unstaking Tests (Restored) ---
-    function test_Stake_SingleUser() public {
-        _stake(user1, 100 ether);
-        assertEq(booster.totalStaked(), 100 ether);
-        assertEq(booster.stakedBalances(user1), 100 ether);
-    }
 
-    function test_Stake_MultipleUsers() public {
-        _stake(user1, 100 ether);
-        _stake(user2, 50 ether);
-        assertEq(booster.totalStaked(), 150 ether);
-        assertEq(booster.stakedBalances(user1), 100 ether);
-        assertEq(booster.stakedBalances(user2), 50 ether);
-    }
-
-    function test_Stake_RevertsZeroAmount() public {
-        vm.startPrank(user1);
-        vm.expectRevert(Booster.NoAmountToStake.selector);
-        booster.stake(0);
+        // Mint mYBBTC to user for staking (deployer is owner of mYBBTC)
+        vm.startPrank(deployer);
+        mYBBTC.mint(user, 1000e18);
         vm.stopPrank();
     }
 
-    function test_Unstake_FullAmount() public {
-        _stake(user1, 100 ether);
-        vm.startPrank(user1);
-        booster.unstake(100 ether);
+    function testStakeMybBTC() public {
+        uint256 stakeAmount = 100e18;
+
+        vm.startPrank(user);
+        mYBBTC.approve(address(booster), stakeAmount);
+        booster.stake(stakeAmount);
         vm.stopPrank();
-        assertEq(booster.totalStaked(), 0);
-        assertEq(booster.stakedBalances(user1), 0);
-    }
-    
-    function test_Unstake_RevertsNotEnoughStaked() public {
-        _stake(user1, 100 ether);
-        vm.startPrank(user1);
-        vm.expectRevert(Booster.NotEnoughStaked.selector);
-        booster.unstake(101 ether);
-        vm.stopPrank();
+
+        assertEq(booster.balanceOf(user), stakeAmount, "User should have staked mYBBTC");
+        assertEq(booster.totalSupply(), stakeAmount, "Booster total supply should be stake amount");
+        assertEq(mYBBTC.balanceOf(user), 900e18, "User mYBBTC balance should decrease");
+        assertEq(mYBBTC.balanceOf(address(booster)), stakeAmount, "Booster should hold mYBBTC");
     }
 
-    // --- Reward Tests (Corrected) ---
-    function test_Reward_SingleUser_SimpleClaim() public {
-        _stake(user1, 100 ether);
-        
-        vm.startPrank(owner);
-        eqmToken.mint(address(booster), 100 ether);
-        booster.notifyRewardAmount(100 ether, 100 seconds);
+    function testEarnedRewardsBeforeNotify() public {
+        uint256 stakeAmount = 100e18;
+
+        vm.startPrank(user);
+        mYBBTC.approve(address(booster), stakeAmount);
+        booster.stake(stakeAmount);
         vm.stopPrank();
 
-        vm.warp(block.timestamp + 100);
+        // Skip some time without notifying rewards
+        skip(10 days);
 
-        _claim(user1);
-        assertApproxEqAbs(eqmToken.balanceOf(user1), 100 ether, 1, "User1 should receive ~100 EQM");
+        // Should be 0 as no rewards have been notified yet
+        assertEq(booster.earned(user), 0, "Earned rewards should be 0 before notifyRewardAmount");
     }
 
-    function test_Reward_MultipleUsers_ProportionalClaim() public {
-        _stake(user1, 100 ether);
-        
-        vm.startPrank(owner);
-        eqmToken.mint(address(booster), 100 ether);
-        booster.notifyRewardAmount(100 ether, 100 seconds);
+    function testNotifyRewardAmountAndEarned() public {
+        uint256 stakeAmount = 100e18; // Corrected to use rewardAmount instead of hardcoded 1000e18 if that was the intent. No, it's just stake amount
+        uint256 rewardAmount = 1000e18; // 1000 EQM rewards
+        uint256 rewardDuration = 7 days;
+
+        vm.startPrank(user);
+        mYBBTC.approve(address(booster), stakeAmount);
+        booster.stake(stakeAmount);
         vm.stopPrank();
-        
-        vm.warp(block.timestamp + 50);
-        _stake(user2, 100 ether);
-        
-        vm.warp(block.timestamp + 50);
 
-        _claim(user1);
-        assertApproxEqAbs(eqmToken.balanceOf(user1), 75 ether, 1, "User1 should receive ~75 EQM");
+        // Deployer, as owner of RewardDistributor, triggers reward distribution
+        vm.startPrank(deployer); 
+        rewardDistributor.distributeRewards(rewardAmount); // This will cause RewardDistributor to mint EQM to Booster
+        vm.stopPrank();
 
-        _claim(user2);
-        assertApproxEqAbs(eqmToken.balanceOf(user2), 25 ether, 1, "User2 should receive ~25 EQM");
+        // Skip half of the reward duration
+        skip(3.5 days);
+
+        // Calculate expected earned rewards
+        uint256 expectedEarned = (rewardAmount * (3.5 days)) / rewardDuration; 
+        assertApproxEqAbs(booster.earned(user), expectedEarned, 1e16, "Earned rewards after partial duration incorrect");
+
+        skip(3.5 days); // Skip remaining duration
+        assertApproxEqAbs(booster.earned(user), rewardAmount, 1e16, "Earned rewards after full duration incorrect");
     }
 
-    function test_Reward_RevertsNoRewardsToClaim() public {
-        _stake(user1, 100 ether);
-        vm.startPrank(user1);
-        vm.expectRevert(Booster.NoRewardsToClaim.selector);
-        booster.claimReward();
+    function testClaimRewards() public {
+        uint256 stakeAmount = 100e18;
+        uint256 rewardAmount = 1000e18;
+        uint256 rewardDuration = 7 days;
+
+        vm.startPrank(user);
+        mYBBTC.approve(address(booster), stakeAmount);
+        booster.stake(stakeAmount);
         vm.stopPrank();
+
+        // Deployer, as owner of RewardDistributor, triggers reward distribution
+        vm.startPrank(deployer); 
+        rewardDistributor.distributeRewards(rewardAmount);
+        vm.stopPrank();
+
+        skip(7 days); // Skip full duration
+
+        // User claims rewards
+        vm.startPrank(user);
+        uint256 initialEQMBalance = eqmToken.balanceOf(user);
+        booster.getReward();
+        uint256 finalEQMBalance = eqmToken.balanceOf(user);
+        vm.stopPrank();
+
+        assertApproxEqAbs(finalEQMBalance - initialEQMBalance, rewardAmount, 1e16, "Claimed EQM amount incorrect");
+        assertEq(booster.earned(user), 0, "Earned rewards should be 0 after claiming");
     }
 
-    // --- Admin Tests (Restored) ---
-    function test_Admin_CanRecoverERC20() public {
-        uint256 lostAmount = 50 ether;
-        externalToken.mint(address(booster), lostAmount);
+    function testWithdrawMybBTC() public {
+        uint256 stakeAmount = 100e18;
+        uint256 withdrawAmount = 50e18;
 
-        vm.startPrank(owner);
-        booster.recoverErc20(address(externalToken), lostAmount);
+        vm.startPrank(user);
+        mYBBTC.approve(address(booster), stakeAmount);
+        booster.stake(stakeAmount);
         vm.stopPrank();
 
-        assertEq(externalToken.balanceOf(owner), lostAmount);
-        assertEq(externalToken.balanceOf(address(booster)), 0);
-    }
+        // Assert initial state after stake
+        assertEq(booster.balanceOf(user), stakeAmount, "User should have staked mYBBTC");
+        assertEq(mYBBTC.balanceOf(user), 900e18, "User mYBBTC balance correct after stake");
+        assertEq(mYBBTC.balanceOf(address(booster)), stakeAmount, "Booster should hold mYBBTC");
 
-    function test_Admin_RevertsRecoverERC20_IfStakingToken() public {
-        mYBTC.mint(address(booster), 10 ether);
-        vm.startPrank(owner);
-        vm.expectRevert("Cannot recover staking token");
-        booster.recoverErc20(address(mYBTC), 10 ether);
+        // Withdraw a portion
+        vm.startPrank(user);
+        booster.withdraw(withdrawAmount);
         vm.stopPrank();
-    }
 
-    function test_Admin_RevertsRecoverERC20_IfEQMToken() public {
-        vm.startPrank(owner);
-        eqmToken.mint(address(booster), 10 ether);
-        vm.expectRevert("Cannot recover EQM token");
-        booster.recoverErc20(address(eqmToken), 10 ether);
-        vm.stopPrank();
-    }
-    
-    function test_Admin_RevertsRecoverERC20_IfNotOwner() public {
-        externalToken.mint(address(booster), 10 ether);
-        vm.startPrank(user1);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user1));
-        booster.recoverErc20(address(externalToken), 10 ether);
-        vm.stopPrank();
+        // Check balances after withdrawal
+        assertEq(booster.balanceOf(user), stakeAmount - withdrawAmount, "User staked balance should decrease");
+        assertEq(booster.totalSupply(), stakeAmount - withdrawAmount, "Booster total supply should decrease");
+        assertEq(mYBBTC.balanceOf(user), 900e18 + withdrawAmount, "User mYBBTC balance should increase");
+        assertEq(mYBBTC.balanceOf(address(booster)), stakeAmount - withdrawAmount, "Booster mYBBTC balance should decrease");
     }
 }

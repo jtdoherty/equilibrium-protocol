@@ -71,8 +71,9 @@ contract HarvestKeeper is KeeperCompatibleInterface, Ownable {
         // 0. Claim YB emissions from the gauge (this is what generates the YB for our YBLocker)
         // This also triggers internal checkpointing in the gauge.
         // Use a low-level call to bypass the 'emit' keyword conflict.
-        (bool success, ) = address(YB_STAKING_GAUGE).call(abi.encodeWithSignature("emit()"));
-        require(success, "Call to emit() failed");
+        // Claim YB emissions directly into the HarvestKeeper
+        uint256 claimedYB = YB_STAKING_GAUGE.claim(YB_TOKEN, address(this));
+        require(claimedYB > 0, "HarvestKeeper: No YB claimed from gauge");
         
         // 1. Trigger the "Brain" to optimize the vault's strategy
         STRATEGY_MANAGER.switchStrategy();

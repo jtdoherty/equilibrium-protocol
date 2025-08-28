@@ -25,6 +25,9 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
     address public strategyManager;
     uint256 public stakedAllocation; // Current percentage of total assets staked (0-10000)
 
+    enum Strategy { Unstaked, Staked }
+    Strategy public currentStrategy; // Added to explicitly track the vault's current strategy
+
     // --- Events ---
     event Deposited(address indexed user, uint256 ybBtcAmount, uint256 mYbBtcShares);
     event Withdrawn(address indexed user, uint256 ybBtcAmount, uint256 mYbBtcShares);
@@ -92,7 +95,7 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
 
         // Burn the user's shares. (Requires m_ybBTC to have a burn function in production).
         // For now, we'll just transfer and rely on total supply being reduced by burning.
-        M_YB_BTC.transferFrom(msg.sender, address(this), _shares); // Placeholder for burn
+        M_YB_BTC.burn(msg.sender, _shares);
 
         // Fulfill withdrawal by unstaking from gauge if liquid balance is insufficient
         if (YB_BTC.balanceOf(address(this)) < amountToWithdraw) {
@@ -139,6 +142,11 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
         }
 
         stakedAllocation = newStakedAllocation;
+        if (newStakedAllocation == 0) {
+            currentStrategy = Strategy.Unstaked;
+        } else {
+            currentStrategy = Strategy.Staked;
+        }
         emit Rebalanced(newStakedAllocation);
     }
     
