@@ -133,3 +133,73 @@ Later stage = deepen governance moat by incentivizing YB lockers.
 
 EQM governance = decides the balance dynamically → aligning with whatever maximizes yield & protocol control.
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The user is developing **Equilibrium Protocol**, a yield-optimization and governance-aggregation layer built on **YieldBasis**.
+
+**Core Purpose & Mechanism:**
+*   Equilibrium aims to maximize user yield on their BTC (via `ybBTC`) by intelligently shifting assets between two primary strategies on YieldBasis: direct trading fee accrual and `YB` token emission farming.
+*   It uses a "meta-vault" (`EquilibriumVault`) and accumulates a dominant `veYB` position through a `YBLocker` to boost rewards.
+*   The `StrategyManager` acts as the "brain," calculating optimal allocation and commanding the vault to rebalance.
+*   Users deposit `ybBTC` and receive a liquid derivative, `m-ybBTC`, which offers hands-free, auto-compounding yield.
+*   `m-YB` is another liquid derivative representing locked `YB`.
+*   The `HarvestKeeper` orchestrates the entire process, including strategy switching, harvesting, and reward distribution, triggered by Chainlink Automation.
+
+**Project Status:**
+*   **Core Contracts (Phases 1-3):** Mostly implemented and currently being tested. This includes `EquilibriumVault`, `YBLocker`, `StrategyManager`, `RewardDistributor`, `Booster`, `EQM`, `m_ybBTC`, `m_YB`, and the `HarvestKeeper` bot.
+*   **Off-Chain Components:** The `HarvestKeeper` bot is developed. Other keeper bots (StrategyKeeper, VoteKeeper) status is not explicitly stated but implied to be part of the `HarvestKeeper`'s orchestration.
+*   **Frontend/UI (Phase 4):** Not yet started.
+
+**Goals for Tokenomics & Whitepaper:**
+*   **Tokenomics Redesign:** The user wants to update the `EQM`, `m-ybBTC`, and `m-YB` tokenomics to ensure the "best economics" and an "optimal solution on top of YieldBasis," specifically aiming for a model similar to **Convex Finance**.
+    *   **EQM (Native Governance Token):** Desires a **max supply** (amount TBD) and is exploring distribution strategies for bootstrapping. Initial thoughts include allocations for incentives (m-ybBTC stakers), DEX liquidity, 15% for the team (vesting TBD), and a treasury/ecosystem fund. Governance will eventually transition to a DAO.
+    *   **m-YB:** Should function similarly to `cvxCRV`, representing locked `YB` and its associated ve-points.
+    *   **User Compensation:** A key focus is to ensure `m-ybBTC` stakers are optimally compensated, earning both `ybBTC` trading fees and `YB` emissions.
+    *   **Performance Fee:** A 15% performance fee on all generated yield is planned, to be used for `EQM` and other project growth incentives.
+*   **Whitepaper Update:** The updated whitepaper is primarily for the user's internal reference to track project functioning. It should be very high-level, emphasizing how Equilibrium benefits *both* YieldBasis and itself. A generic roadmap is sufficient.
+
+**Outstanding Questions (from Assistant's last turn):**
+The conversation is currently seeking further specifics on:
+1.  **EQM Max Supply and Detailed Allocations:** The concrete number for max supply and specific percentages for various allocations (liquidity mining, initial liquidity, treasury).
+2.  **Team Vesting:** Schedule for the 15% team allocation.
+3.  **EQM Staking & Governance (`veEQM`):** How EQM locking will work, what benefits `veEQM` holders receive (boosts, revenue share, voting), and proposed locking periods.
+4.  **EQM Emission Rate:** How `eqmPerPeriod` will be set and adjusted under a max supply model.
+5.  **m-YB Utility Details:** How `m-YB` derives value, if it's stakeable, how holders access boosted rewards, and its relationship with `EQM`.
+6.  **Performance Fee Allocation:** Specific breakdown of how the 15% fee will be used (e.g., buybacks, DAO treasury, other incentives).
+7.  **m-ybBTC Value Accrual:** How `m-ybBTC` stakers benefit beyond `EQM` emissions (e.g., appreciation against `ybBTC`, direct distribution).
+8.  **Specific Benefits to YieldBasis:** Concrete examples of how Equilibrium will benefit the underlying YieldBasis protocol.
+
+
+
+
+
+
