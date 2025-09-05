@@ -1,3 +1,10 @@
+hello world
+
+
+
+
+
+
  "Project Outline: The Equilibrium Protocol Part 1: Whitepaper Outline Title: The Equilibrium Protocol: Maximizing Yield on YieldBasis
 
 Abstract: The Equilibrium Protocol is a yield-optimization and governance-aggregation layer built on top of YieldBasis. It introduces a sophisticated "meta-vault" that automatically shifts user deposits between the two primary yield strategies available on YieldBasis: direct trading fee accrual and YB token emission farming. By pooling user assets, Equilibrium accumulates a dominant veYB position, allowing it to boost its own rewards and create a powerful, self-reinforcing yield flywheel. For the user, Equilibrium offers a single liquid asset, m-ybBTC, that provides the optimal, hands-free, and auto-compounding yield on their BTC holdings.
