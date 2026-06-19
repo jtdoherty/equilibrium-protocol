@@ -68,13 +68,12 @@ contract HarvestKeeper is KeeperCompatibleInterface, Ownable {
 
         // --- THE ORCHESTRATION CHECKLIST ---
 
-        // 0. Claim YB emissions from the gauge (this is what generates the YB for our YBLocker)
-        // This also triggers internal checkpointing in the gauge.
-        // Use a low-level call to bypass the 'emit' keyword conflict.
-        // Claim YB emissions directly into the HarvestKeeper
-        uint256 claimedYB = YB_STAKING_GAUGE.claim(YB_TOKEN, address(this));
-        require(claimedYB > 0, "HarvestKeeper: No YB claimed from gauge");
-        
+        // 0. Claim any YB emissions from the gauge into the HarvestKeeper. This may be zero
+        // in a period with no emissions; that must not block the rest of the cycle (strategy
+        // switching, fee compounding, EQM distribution all still need to run). Steps below
+        // already guard on balances, so no claimed YB simply means nothing to lock this round.
+        YB_STAKING_GAUGE.claim(YB_TOKEN, address(this));
+
         // 1. Trigger the "Brain" to optimize the vault's strategy
         STRATEGY_MANAGER.switchStrategy();
 
