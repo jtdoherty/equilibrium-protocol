@@ -117,11 +117,10 @@ contract StrategyManagerTest is Test {
     function testGetStakedAPY() public {
         // Need to set up state for Staked APY calculation
         
-        // 1. Mock YB emissions from YB_GAUGE_CONTROLLER (YB_TOKEN balance within it)
-        // The StrategyManager uses YB_GAUGE_CONTROLLER.TOKEN().balanceOf(address(YB_GAUGE_CONTROLLER))
-        // as a placeholder for global YB inflation rate. So mint YB to ybGaugeController.
-        uint256 globalYBInflationRate = 1000e18; // Mock value for YB emissions per second
-        YB_TOKEN.mint(address(ybGaugeController), globalYBInflationRate); // Mint YB to gauge controller
+        // 1. Set the YB emission rate (per second) used for the staked-APY estimate.
+        uint256 globalYBInflationRate = 1000e18; // YB emissions per second
+        vm.prank(deployer); // StrategyManager owner
+        strategyManager.setYbEmissionRatePerSecond(globalYBInflationRate);
 
         // 2. YB Price Feed is already set up in setUp
         // YB_PRICE_FEED has price of 1e8 (1 USD with 8 decimals)
@@ -174,8 +173,8 @@ contract StrategyManagerTest is Test {
         skip(1 days);
 
         // Set YB emissions high for staked APY
-        uint256 globalYBInflationRate = 5000e18; 
-        YB_TOKEN.mint(address(ybGaugeController), globalYBInflationRate); // Mock gauge controller token balance
+        uint256 globalYBInflationRate = 5000e18;
+        strategyManager.setYbEmissionRatePerSecond(globalYBInflationRate);
         ybPriceFeed.updateAnswer(2e8); // YB price to 2 USD
 
         // Console logs for debugging

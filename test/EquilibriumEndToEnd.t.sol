@@ -18,7 +18,6 @@ import {Booster} from "src/Booster.sol";
 import {StrategyManager} from "src/StrategyManager.sol";
 import {HarvestKeeper} from "src/HarvestKeeper.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol"; // Added this import
-import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 contract EquilibriumEndToEndTest is Test {
     // --- User and Keeper Addresses ---
@@ -150,19 +149,22 @@ contract EquilibriumEndToEndTest is Test {
         equilibriumVault.deposit(INITIAL_YB_BTC_DEPOSIT);
         vm.stopPrank();
 
+        uint256 minLiquidity = equilibriumVault.MINIMUM_LIQUIDITY();
+        uint256 aliceShares = m_ybBTC_token.balanceOf(alice);
         assertEq(ybBTC_mock.balanceOf(address(equilibriumVault)), INITIAL_YB_BTC_DEPOSIT, "Vault should hold ybBTC");
-        assertEq(m_ybBTC_token.balanceOf(alice), INITIAL_YB_BTC_DEPOSIT, "Alice should receive m_ybBTC");
+        assertEq(aliceShares, INITIAL_YB_BTC_DEPOSIT - minLiquidity, "Alice should receive m_ybBTC minus locked minimum");
         assertEq(equilibriumVault.totalAssets(), INITIAL_YB_BTC_DEPOSIT, "Vault total assets incorrect after deposit");
 
         vm.startPrank(alice);
-        m_ybBTC_token.approve(address(equilibriumVault), INITIAL_YB_BTC_DEPOSIT); // Approve burn
-        equilibriumVault.withdraw(INITIAL_YB_BTC_DEPOSIT);
+        m_ybBTC_token.approve(address(equilibriumVault), aliceShares); // Approve burn
+        equilibriumVault.withdraw(aliceShares);
         vm.stopPrank();
 
-        assertEq(ybBTC_mock.balanceOf(alice), INITIAL_YB_BTC_DEPOSIT, "Alice should have ybBTC back");
+        // Alice gets back her deposit minus the permanently-locked minimum, which stays in the vault.
+        assertEq(ybBTC_mock.balanceOf(alice), INITIAL_YB_BTC_DEPOSIT - minLiquidity, "Alice should have ybBTC back");
         assertEq(m_ybBTC_token.balanceOf(alice), 0, "Alice should have 0 m_ybBTC");
-        assertEq(ybBTC_mock.balanceOf(address(equilibriumVault)), 0, "Vault should have 0 ybBTC");
-        assertEq(equilibriumVault.totalAssets(), 0, "Vault total assets incorrect after withdrawal");
+        assertEq(ybBTC_mock.balanceOf(address(equilibriumVault)), minLiquidity, "Vault retains the locked minimum backing");
+        assertEq(equilibriumVault.totalAssets(), minLiquidity, "Vault total assets should equal the locked minimum");
     }
 
     function testFullHarvestAndStrategySwitch() public {
@@ -179,10 +181,10 @@ contract EquilibriumEndToEndTest is Test {
         strategyManager.setRebalanceThreshold(1);
 
         // --- Scenario 1: staking is clearly more profitable -> vault should stake ---
-        // getStakedAPY reads the gauge controller's YB balance and the price feed; drive
-        // both up. No fee data is set, so getUnstakedAPY is 0 and staking wins.
-        vm.prank(deployer);
-        YB_mock.mint(address(ybGaugeController_mock), 5_000 ether);
+        // Drive the staked-APY inputs (emission rate + YB price) up. No fee data is set, so
+        // getUnstakedAPY is 0 and staking wins.
+        vm.prank(address(harvestKeeper));
+        strategyManager.setYbEmissionRatePerSecond(5_000 ether);
         ybPriceFeed_mock.updateAnswer(2e8); // YB at $2
 
         _seedGaugeYB(50 ether);
@@ -194,14 +196,10 @@ contract EquilibriumEndToEndTest is Test {
         assertEq(uint256(equilibriumVault.currentStrategy()), uint256(EquilibriumVault.Strategy.Staked), "Vault strategy should be Staked");
 
         // --- Scenario 2: trading fees now dominate -> vault should unstake ---
-        // Force getStakedAPY to 0 by mocking the controller's YB balance to 0, and pump the
-        // trailing fee revenue (3 days of the circular buffer) so getUnstakedAPY is high.
-        vm.mockCall(
-            address(YB_mock),
-            abi.encodeWithSelector(IERC20.balanceOf.selector, address(ybGaugeController_mock)),
-            abi.encode(uint256(0))
-        );
+        // Set the staked-APY emission rate to 0 and pump the trailing fee revenue
+        // (3 entries of the circular buffer) so getUnstakedAPY is high.
         vm.startPrank(address(harvestKeeper));
+        strategyManager.setYbEmissionRatePerSecond(0);
         strategyManager.updateFeeData(1_000 ether);
         strategyManager.updateFeeData(1_000 ether);
         strategyManager.updateFeeData(1_000 ether);
@@ -216,6 +214,24 @@ contract EquilibriumEndToEndTest is Test {
         assertLt(equilibriumVault.stakedAllocation(), stakedBefore, "Vault should have unstaked when fee APY dominates");
         assertEq(uint256(equilibriumVault.currentStrategy()), uint256(EquilibriumVault.Strategy.Unstaked), "Vault strategy should be Unstaked");
     }
+    function testUpkeepRunsWithNoEmissions() public {
+        // Deposit so the vault has assets, but do NOT seed any claimable YB in the gauge.
+        vm.startPrank(alice);
+        ybBTC_mock.approve(address(equilibriumVault), INITIAL_YB_BTC_DEPOSIT);
+        equilibriumVault.deposit(INITIAL_YB_BTC_DEPOSIT);
+        vm.stopPrank();
+
+        uint256 initialEQMBooster = EQM_token.balanceOf(address(booster));
+
+        // A period with zero emissions must still run the full cycle, not revert.
+        _advancePastInterval();
+        vm.prank(address(harvestKeeper));
+        harvestKeeper.performUpkeep("");
+
+        // EQM incentives are still distributed even though no YB was claimable.
+        assertGt(EQM_token.balanceOf(address(booster)), initialEQMBooster, "Upkeep should still distribute EQM with no emissions");
+    }
+
     function testHarvestKeeperLocksYBAndDistributesEQM() public {
         uint256 simulatedYBEmission = 500 ether;
 

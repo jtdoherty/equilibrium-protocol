@@ -28,6 +28,12 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
     enum Strategy { Unstaked, Staked }
     Strategy public currentStrategy; // Added to explicitly track the vault's current strategy
 
+    // Permanently-locked shares minted on the first deposit. By ensuring total share
+    // supply can never return to a tiny number, this blocks the classic first-depositor
+    // share-price inflation/donation attack.
+    uint256 public constant MINIMUM_LIQUIDITY = 1e3;
+    address private constant DEAD_ADDRESS = 0x000000000000000000000000000000000000dEaD;
+
     // --- Events ---
     event Deposited(address indexed user, uint256 ybBtcAmount, uint256 mYbBtcShares);
     event Withdrawn(address indexed user, uint256 ybBtcAmount, uint256 mYbBtcShares);
@@ -64,7 +70,10 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
         
         uint256 sharesToMint;
         if (currentTotalShares == 0) {
-            sharesToMint = _amount; // First deposit, 1:1
+            // First deposit: lock MINIMUM_LIQUIDITY shares forever; depositor gets the rest.
+            require(_amount > MINIMUM_LIQUIDITY, "Vault: first deposit too small");
+            M_YB_BTC.mint(DEAD_ADDRESS, MINIMUM_LIQUIDITY);
+            sharesToMint = _amount - MINIMUM_LIQUIDITY;
         } else {
             // Mint shares based on current NAV
             sharesToMint = (_amount * currentTotalShares) / currentTotalAssets;

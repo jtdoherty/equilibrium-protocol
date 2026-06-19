@@ -37,7 +37,13 @@ contract StrategyManager is Ownable {
     uint256 public constant FEE_HISTORY_WINDOW_DAYS = 7; // Number of days for trailing average
 
     // Current target allocation set by the manager (0-10000, e.g., 7500 = 75%)
-    uint256 public currentStakedAllocation = 0; 
+    uint256 public currentStakedAllocation = 0;
+
+    // Honest, owner-set inputs for the staked-APY estimate. These stand in for data that
+    // would come from a real YieldBasis integration; until then they are explicit parameters
+    // rather than misleading on-chain reads.
+    uint256 public ybEmissionRatePerSecond; // YB emitted to this gauge per second
+    uint256 public externalGaugeStake;      // ybBTC staked in the gauge by everyone except this vault
 
     // --- Events ---
     event StrategyRebalanced(uint256 newStakedAllocation);
@@ -76,8 +82,7 @@ contract StrategyManager is Ownable {
 
         // Get the APYs to include in the event log
         uint256 unstakedApy = getUnstakedAPY();
-        uint256 totalStakedInGaugeByOthers = YB_STAKING_GAUGE.balanceOf(address(0)); 
-        uint256 stakedApyAtOptimal = getStakedAPY(totalStakedInGaugeByOthers + (totalAssets * optimalAllocation) / 10000);
+        uint256 stakedApyAtOptimal = getStakedAPY(externalGaugeStake + (totalAssets * optimalAllocation) / 10000);
 
         // Check if the change is significant enough to warrant a rebalance
         // currentStakedAllocation is scaled by 10000 (100% = 10000)
@@ -106,9 +111,13 @@ contract StrategyManager is Ownable {
         if (_totalVaultAssets == 0) return 0;
 
         uint256 unstakedApy = getUnstakedAPY();
-        // Total staked in the YieldBasis gauge by everyone else *before* our potential stake
-        uint256 totalStakedInGaugeByOthers = YB_STAKING_GAUGE.balanceOf(address(0)); // This is a mock function, need to adjust with real YieldBasis API.
-                                                                                // Ideally, we'd query total supply of LP token in the Gauge, then subtract our own.
+        // Total staked in the YieldBasis gauge by everyone else *before* our potential stake.
+        uint256 totalStakedInGaugeByOthers = externalGaugeStake;
+
+        // Hoist the loop-invariant reads (emission rate + price) out of the loop: getStakedAPY
+        // would otherwise re-read the price feed on all 101 iterations. The staked APY for a
+        // given total stake is then just yearlyRewardValue * 1e18 / totalStaked.
+        uint256 yearlyRewardValue = _yearlyRewardValue();
 
         uint256 bestAllocation = 0;
         uint256 maxAPY = 0; // Or a very low value
@@ -119,7 +128,9 @@ contract StrategyManager is Ownable {
             uint256 ourHypotheticalStake = (_totalVaultAssets * i) / 100;
             uint256 totalHypotheticalStakeInGauge = totalStakedInGaugeByOthers + ourHypotheticalStake;
 
-            uint256 stakedApy = getStakedAPY(totalHypotheticalStakeInGauge);
+            uint256 stakedApy = totalHypotheticalStakeInGauge == 0
+                ? 0
+                : (yearlyRewardValue * 1e18) / totalHypotheticalStakeInGauge;
 
             // Calculate the blended APY for the vault's total assets
             uint256 blendedApy = ((ourHypotheticalStake * stakedApy) + ((_totalVaultAssets - ourHypotheticalStake) * unstakedApy)) / _totalVaultAssets;
@@ -142,25 +153,21 @@ contract StrategyManager is Ownable {
      */
     function getStakedAPY(uint256 _totalStakedAssets) public view returns (uint256) {
         if (_totalStakedAssets == 0) return 0; // Or handle as an error if this state is impossible
+        // APY = (Yearly Reward Value / Total Value Staked), scaled by 1e18.
+        // ybBTC is assumed to be priced at 1 USD as the APY base.
+        return (_yearlyRewardValue() * 1e18) / _totalStakedAssets;
+    }
 
-        // 1. Get YB emission rate (global for now, will be per gauge via controller)
-        // Assuming YB_GAUGE_CONTROLLER.TOKEN() returns the YB token and it has an inflation_rate()
-        // If not, this needs to be adjusted based on the actual YieldBasis API.
-        uint256 globalYBInflationRate = IERC20(YB_GAUGE_CONTROLLER.TOKEN()).balanceOf(address(YB_GAUGE_CONTROLLER)); // Placeholder
-                                         // A real gauge controller would have a function like `gauge_emissions_per_second()`
-        uint256 emissionsPerYear = globalYBInflationRate * ONE_YEAR_IN_SECONDS; // Placeholder for actual emissions logic
+    /// @dev USD value of one year of YB emissions to this gauge, scaled to 1e18.
+    /// Reads the owner-set emission rate and the Chainlink YB price exactly once.
+    function _yearlyRewardValue() internal view returns (uint256) {
+        uint256 emissionsPerYear = ybEmissionRatePerSecond * ONE_YEAR_IN_SECONDS;
 
-        // 2. Get the price of YB from Chainlink
         (, int256 price, , , ) = YB_PRICE_FEED.latestRoundData();
         require(price > 0, "Strategy: YB Price must be positive");
-        uint256 ybPrice = uint256(price) * 1e10; // Chainlink typically 8 decimals, convert to 18
+        uint256 ybPrice = uint256(price) * 1e10; // Chainlink 8 decimals -> 18
 
-        // 3. Calculate total value of yearly emissions
-        uint256 yearlyRewardValue = (emissionsPerYear * ybPrice) / 1e18; // Value of YB rewards in USD (or base currency)
-        
-        // APY = (Yearly Reward Value / Total Value Staked) * 100 (scaled by 1e18)
-        // Assume ybBTC has a price of 1 USD for simplicity for APY calculation base
-        return (yearlyRewardValue * 1e18) / _totalStakedAssets; // Return scaled APY
+        return (emissionsPerYear * ybPrice) / 1e18;
     }
 
     /**
@@ -208,5 +215,17 @@ contract StrategyManager is Ownable {
     function setRebalanceThreshold(uint256 _newThreshold) external onlyOwner {
         require(_newThreshold <= 10000, "Strategy: Threshold cannot exceed 100%");
         rebalanceThreshold = _newThreshold;
+    }
+
+    /// @notice Sets the YB emission rate (per second) used to estimate the staked APY.
+    /// @dev Manual input until a real YieldBasis gauge-emissions feed is integrated.
+    function setYbEmissionRatePerSecond(uint256 _ratePerSecond) external onlyOwner {
+        ybEmissionRatePerSecond = _ratePerSecond;
+    }
+
+    /// @notice Sets the amount of ybBTC staked in the gauge by parties other than this vault.
+    /// @dev Used to account for reward dilution; manual input until read from the real gauge.
+    function setExternalGaugeStake(uint256 _externalStake) external onlyOwner {
+        externalGaugeStake = _externalStake;
     }
 }
