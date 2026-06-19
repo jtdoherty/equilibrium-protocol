@@ -1,9 +1,0 @@
-type TONKey {
-	id: ID!
-	addressBase64: String!
-	rawAddress: String!
-}
-
-type TONKeysPayload {
-	results: [TONKey!]!
-}
