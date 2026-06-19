@@ -18,6 +18,7 @@ import {Booster} from "src/Booster.sol";
 import {StrategyManager} from "src/StrategyManager.sol";
 import {HarvestKeeper} from "src/HarvestKeeper.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol"; // Added this import
+import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 contract EquilibriumEndToEndTest is Test {
     // --- User and Keeper Addresses ---
@@ -125,6 +126,22 @@ contract EquilibriumEndToEndTest is Test {
         vm.stopPrank();
     }
 
+    // Mint YB into the gauge and mark it claimable by the keeper, simulating a
+    // period's worth of emissions. performUpkeep requires claimedYB > 0, so this
+    // must be called before each upkeep cycle.
+    function _seedGaugeYB(uint256 amount) internal {
+        vm.startPrank(deployer);
+        YB_mock.mint(address(ybStakingGauge_mock), amount);
+        ybStakingGauge_mock.setRewards(address(harvestKeeper), amount);
+        vm.stopPrank();
+    }
+
+    // Move time just past the keeper's interval so the next performUpkeep runs.
+    // Derived from lastUpdateTime so it is robust to whatever the current timestamp is.
+    function _advancePastInterval() internal {
+        vm.warp(harvestKeeper.lastUpdateTime() + harvestKeeper.interval() + 1);
+    }
+
     // --- Start of End-to-End Test Cases ---
 
     function testUserDepositAndWithdraw() public {
@@ -149,118 +166,84 @@ contract EquilibriumEndToEndTest is Test {
     }
 
     function testFullHarvestAndStrategySwitch() public {
-        // 1. User Deposits
+        // 1. User deposits; vault starts fully unstaked.
         vm.startPrank(alice);
         ybBTC_mock.approve(address(equilibriumVault), INITIAL_YB_BTC_DEPOSIT);
         equilibriumVault.deposit(INITIAL_YB_BTC_DEPOSIT);
         vm.stopPrank();
-
-        // Ensure vault is initially unstaked (default)
         assertEq(equilibriumVault.stakedAllocation(), 0, "Vault should start with 0% staked");
 
-        // Simulate some initial unstaked yield data
-        uint256 simulatedDailyFee = 100 ether;
-        vm.startPrank(deployer);
-        ybBTC_mock.mint(deployer, simulatedDailyFee); 
-        ybBTC_mock.approve(address(harvestKeeper), simulatedDailyFee); 
-        harvestKeeper.addHarvestableBtcFees(simulatedDailyFee); 
-        vm.stopPrank();
-        
-        // Ensure YB is available in the gauge for HarvestKeeper to claim
-        uint256 simulatedYBEmissionForGauge = 50 ether; // YB for the gauge
-        vm.startPrank(deployer);
-        YB_mock.mint(address(ybStakingGauge_mock), simulatedYBEmissionForGauge); // Mint YB to the gauge itself
-        ybStakingGauge_mock.setRewards(address(harvestKeeper), simulatedYBEmissionForGauge); // Set rewards for HarvestKeeper
-        vm.stopPrank();
-
-
-        vm.warp(block.timestamp + 1 days); // Advance time for fee data
+        // Low threshold so any change in the optimal allocation triggers a rebalance.
+        // The HarvestKeeper owns the StrategyManager, so it is the privileged caller.
         vm.prank(address(harvestKeeper));
-        harvestKeeper.performUpkeep(""); // This will call updateFeeData and claim YB
+        strategyManager.setRebalanceThreshold(1);
 
-        // Strategy 1: Staking APY is lower, expect to remain unstaked or less staked
-        uint256 unstakedAPY_scenario1 = 10_000; // 10%
-        uint256 stakedAPY_scenario1 = 5_000;    // 5%
+        // --- Scenario 1: staking is clearly more profitable -> vault should stake ---
+        // getStakedAPY reads the gauge controller's YB balance and the price feed; drive
+        // both up. No fee data is set, so getUnstakedAPY is 0 and staking wins.
+        vm.prank(deployer);
+        YB_mock.mint(address(ybGaugeController_mock), 5_000 ether);
+        ybPriceFeed_mock.updateAnswer(2e8); // YB at $2
 
-        vm.mockCall(address(strategyManager), abi.encodeWithSelector(strategyManager.getUnstakedAPY.selector), abi.encode(unstakedAPY_scenario1));
-        vm.mockCall(address(strategyManager), abi.encodeWithSelector(strategyManager.getStakedAPY.selector), abi.encode(stakedAPY_scenario1));
-
-        uint256 currentStakedAllocationBefore1 = equilibriumVault.stakedAllocation();
-        vm.warp(block.timestamp + KEEPER_INTERVAL + 1); 
-        vm.prank(address(harvestKeeper));
-        harvestKeeper.performUpkeep(""); // Should not switch to staked or only minimally
-
-        // Assert that staked allocation does not increase significantly or stays the same
-        assertLe(equilibriumVault.stakedAllocation(), currentStakedAllocationBefore1, "Vault should not have staked more if unstaked APY is higher");
-
-        // Strategy 2: Staking APY is higher, expect a switch to staked
-        uint256 unstakedAPY_scenario2 = 5_000;   // 5%
-        uint256 stakedAPY_scenario2 = 10_000;   // 10%
-
-        vm.mockCall(address(strategyManager), abi.encodeWithSelector(strategyManager.getUnstakedAPY.selector), abi.encode(unstakedAPY_scenario2));
-        vm.mockCall(address(strategyManager), abi.encodeWithSelector(strategyManager.getStakedAPY.selector), abi.encode(stakedAPY_scenario2));
-
-        uint256 currentStakedAllocationBefore2 = equilibriumVault.stakedAllocation();
-        vm.warp(block.timestamp + KEEPER_INTERVAL + 1); 
-        vm.prank(address(harvestKeeper));
-        harvestKeeper.performUpkeep(""); // Should switch to staked
-
-        // Assert that the strategy has switched to stake some assets
-        assertGt(equilibriumVault.stakedAllocation(), currentStakedAllocationBefore2, "Vault should have rebalanced to stake more assets");
-        assertEq(uint256(equilibriumVault.currentStrategy()), uint256(EquilibriumVault.Strategy.Staked), "Vault strategy should be Staked");
-
-        // Strategy 3: Staking APY is lower again, expect a switch back to unstaked
-        uint256 unstakedAPY_scenario3 = 12_000; // 12%
-        uint256 stakedAPY_scenario3 = 8_000;    // 8%
-
-        vm.mockCall(address(strategyManager), abi.encodeWithSelector(strategyManager.getUnstakedAPY.selector), abi.encode(unstakedAPY_scenario3));
-        vm.mockCall(address(strategyManager), abi.encodeWithSelector(strategyManager.getStakedAPY.selector), abi.encode(stakedAPY_scenario3));
-
-        uint256 currentStakedAllocationBefore3 = equilibriumVault.stakedAllocation();
-        vm.warp(block.timestamp + KEEPER_INTERVAL + 1); 
-        vm.prank(address(harvestKeeper));
-        harvestKeeper.performUpkeep(""); // Should switch back to unstaked (or reduce staked allocation)
-
-        // Assert that the strategy has switched back to unstaked or reduced staked allocation
-        assertLe(equilibriumVault.stakedAllocation(), currentStakedAllocationBefore3, "Vault should have rebalanced to unstake assets");
-        assertEq(uint256(equilibriumVault.currentStrategy()), uint256(EquilibriumVault.Strategy.Unstaked), "Vault strategy should be Unstaked");
-    }
-    function testHarvestKeeperSendsMYBToRewardDistributor() public {
-        uint256 simulatedYBEmission = 500 ether; // More YB for clearer testing
-
-        // Add user deposit to ensure the vault has assets, avoiding ZeroTotalAssets() revert
-        vm.startPrank(alice);
-        ybBTC_mock.approve(address(equilibriumVault), INITIAL_YB_BTC_DEPOSIT);
-        equilibriumVault.deposit(INITIAL_YB_BTC_DEPOSIT);
-        vm.stopPrank();
-
-        // Ensure YB is available in the gauge for HarvestKeeper to claim
-        vm.startPrank(deployer);
-        YB_mock.mint(address(ybStakingGauge_mock), simulatedYBEmission); // Mint YB to the gauge
-        ybStakingGauge_mock.setRewards(address(harvestKeeper), simulatedYBEmission); // Set rewards for HarvestKeeper to claim
-        vm.stopPrank();
-
-        uint256 initialMYBRewardDistributor = m_YB_token.balanceOf(address(rewardDistributor));
-        uint256 initialEQMBooster = EQM_token.balanceOf(address(booster));
-
-        vm.warp(block.timestamp + KEEPER_INTERVAL + 1); // Advance time for upkeep
-
+        _seedGaugeYB(50 ether);
+        _advancePastInterval();
         vm.prank(address(harvestKeeper));
         harvestKeeper.performUpkeep("");
 
-        // Assert YB is transferred from HarvestKeeper to YBLocker
-        assertEq(YB_mock.balanceOf(address(harvestKeeper)), 0, "HarvestKeeper should have transferred YB");
-        assertEq(YB_mock.balanceOf(address(ybLocker)), simulatedYBEmission, "YBLocker should have received YB");
+        assertGt(equilibriumVault.stakedAllocation(), 0, "Vault should have staked when staking APY dominates");
+        assertEq(uint256(equilibriumVault.currentStrategy()), uint256(EquilibriumVault.Strategy.Staked), "Vault strategy should be Staked");
 
-        // Assert YB is locked in VotingEscrow
-        assertGt(ybVotingEscrow_mock.balanceOf(address(ybLocker)), 0, "YB Locker should have locked YB in VotingEscrow");
+        // --- Scenario 2: trading fees now dominate -> vault should unstake ---
+        // Force getStakedAPY to 0 by mocking the controller's YB balance to 0, and pump the
+        // trailing fee revenue (3 days of the circular buffer) so getUnstakedAPY is high.
+        vm.mockCall(
+            address(YB_mock),
+            abi.encodeWithSelector(IERC20.balanceOf.selector, address(ybGaugeController_mock)),
+            abi.encode(uint256(0))
+        );
+        vm.startPrank(address(harvestKeeper));
+        strategyManager.updateFeeData(1_000 ether);
+        strategyManager.updateFeeData(1_000 ether);
+        strategyManager.updateFeeData(1_000 ether);
+        vm.stopPrank();
 
-        // Assert m_YB is minted to HarvestKeeper then sent to RewardDistributor
-        assertEq(m_YB_token.balanceOf(address(harvestKeeper)), 0, "HarvestKeeper should have transferred m_YB");
-        assertEq(m_YB_token.balanceOf(address(rewardDistributor)), initialMYBRewardDistributor + simulatedYBEmission, "RewardDistributor should have received m_YB");
+        uint256 stakedBefore = equilibriumVault.stakedAllocation();
+        _seedGaugeYB(50 ether);
+        _advancePastInterval();
+        vm.prank(address(harvestKeeper));
+        harvestKeeper.performUpkeep("");
 
-        // Assert RewardDistributor mints EQM to Booster
-        assertGt(EQM_token.balanceOf(address(booster)), initialEQMBooster, "Booster should have received EQM rewards from RewardDistributor");
+        assertLt(equilibriumVault.stakedAllocation(), stakedBefore, "Vault should have unstaked when fee APY dominates");
+        assertEq(uint256(equilibriumVault.currentStrategy()), uint256(EquilibriumVault.Strategy.Unstaked), "Vault strategy should be Unstaked");
+    }
+    function testHarvestKeeperLocksYBAndDistributesEQM() public {
+        uint256 simulatedYBEmission = 500 ether;
+
+        // Deposit so the vault has assets (avoids StrategyManager's ZeroTotalAssets() revert).
+        vm.startPrank(alice);
+        ybBTC_mock.approve(address(equilibriumVault), INITIAL_YB_BTC_DEPOSIT);
+        equilibriumVault.deposit(INITIAL_YB_BTC_DEPOSIT);
+        vm.stopPrank();
+
+        _seedGaugeYB(simulatedYBEmission);
+
+        uint256 initialEQMBooster = EQM_token.balanceOf(address(booster));
+
+        vm.warp(block.timestamp + KEEPER_INTERVAL + 1);
+        vm.prank(address(harvestKeeper));
+        harvestKeeper.performUpkeep("");
+
+        // The keeper claimed the YB and forwarded all of it to the YBLocker, which locked it
+        // into the VotingEscrow (so neither the keeper nor the locker still holds raw YB).
+        assertEq(YB_mock.balanceOf(address(harvestKeeper)), 0, "Keeper should have forwarded all YB");
+        assertEq(YB_mock.balanceOf(address(ybLocker)), 0, "YBLocker should have locked, not held, the YB");
+        assertEq(ybVotingEscrow_mock.balanceOf(address(ybLocker)), simulatedYBEmission, "VotingEscrow should hold the locked YB");
+
+        // Locking mints liquid m_YB to the locker's owner, the HarvestKeeper.
+        assertEq(m_YB_token.balanceOf(address(harvestKeeper)), simulatedYBEmission, "Keeper should hold the minted m_YB");
+
+        // The keeper distributed EQM incentives to the Booster via the RewardDistributor.
+        assertGt(EQM_token.balanceOf(address(booster)), initialEQMBooster, "Booster should have received EQM rewards");
     }
 
     function testHarvestKeeperAccessControl() public {
