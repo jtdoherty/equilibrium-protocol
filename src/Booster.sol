@@ -21,6 +21,7 @@ contract Booster is Ownable, ReentrancyGuard {
 
     // Reward calculation variables
     uint256 public rewardRate;
+    uint256 public periodFinish;   // timestamp at which the current reward period ends
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
     mapping(address => uint256) public userRewardPerTokenPaid;
@@ -44,7 +45,7 @@ contract Booster is Ownable, ReentrancyGuard {
     // --- Core Reward Logic ---
     modifier updateReward(address _account) {
         rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = block.timestamp;
+        lastUpdateTime = lastTimeRewardApplicable();
         if (_account != address(0)) {
             rewards[_account] = earned(_account);
             userRewardPerTokenPaid[_account] = rewardPerTokenStored;
@@ -52,11 +53,17 @@ contract Booster is Ownable, ReentrancyGuard {
         _;
     }
 
+    /// @notice The last time rewards are applicable: now, or the period end if it has passed.
+    /// @dev This cap is what stops rewards from accruing forever after the funded period ends.
+    function lastTimeRewardApplicable() public view returns (uint256) {
+        return block.timestamp < periodFinish ? block.timestamp : periodFinish;
+    }
+
     function rewardPerToken() public view returns (uint256) {
         if (totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        return rewardPerTokenStored + ((block.timestamp - lastUpdateTime) * rewardRate * 1e18) / totalSupply;
+        return rewardPerTokenStored + ((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18) / totalSupply;
     }
 
     function earned(address _account) public view returns (uint256) {
@@ -100,16 +107,18 @@ contract Booster is Ownable, ReentrancyGuard {
         require(_duration > 0, "Booster: Duration must be > 0");
         require(_reward > 0, "Booster: Reward must be > 0");
 
-        // Calculate new reward rate based on the new reward and remaining time
-        if (block.timestamp >= lastUpdateTime + _duration) {
+        // Calculate new reward rate, rolling any not-yet-distributed rewards from the
+        // current period into the new one.
+        if (block.timestamp >= periodFinish) {
             rewardRate = _reward / _duration;
         } else {
-            uint256 remaining = lastUpdateTime + _duration - block.timestamp;
+            uint256 remaining = periodFinish - block.timestamp;
             uint256 leftover = remaining * rewardRate;
             rewardRate = (_reward + leftover) / _duration;
         }
 
         lastUpdateTime = block.timestamp;
+        periodFinish = block.timestamp + _duration;
         emit RewardNotified(_reward, _duration);
     }
 }

@@ -116,6 +116,29 @@ contract BoosterTest is Test {
         assertApproxEqAbs(booster.earned(user), rewardAmount, 1e16, "Earned rewards after full duration incorrect");
     }
 
+    function testRewardsStopAccruingAfterPeriodEnds() public {
+        uint256 stakeAmount = 100e18;
+        uint256 rewardAmount = 1000e18;
+
+        vm.startPrank(user);
+        mYBBTC.approve(address(booster), stakeAmount);
+        booster.stake(stakeAmount);
+        vm.stopPrank();
+
+        vm.prank(deployer);
+        rewardDistributor.distributeRewards(rewardAmount); // 7-day period
+
+        // Long after the period ends, earned must be capped at the funded amount,
+        // not keep growing with elapsed time.
+        skip(70 days);
+        assertApproxEqAbs(booster.earned(user), rewardAmount, 1e16, "Earned must not exceed the funded reward after the period ends");
+
+        // And the user can actually claim it (the Booster holds exactly rewardAmount).
+        vm.prank(user);
+        booster.getReward();
+        assertApproxEqAbs(eqmToken.balanceOf(user), rewardAmount, 1e16, "Claim should pay the funded reward, no more");
+    }
+
     function testClaimRewards() public {
         uint256 stakeAmount = 100e18;
         uint256 rewardAmount = 1000e18;
