@@ -3,7 +3,7 @@
 ![Status: Beta](https://img.shields.io/badge/status-beta-orange)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Built with Foundry](https://img.shields.io/badge/built%20with-Foundry-black)
-[![CI](https://github.com/jtdoherty/eqm-proto/actions/workflows/test.yml/badge.svg)](https://github.com/jtdoherty/eqm-proto/actions/workflows/test.yml)
+[![CI](https://github.com/jtdoherty/equilibrium-protocol/actions/workflows/test.yml/badge.svg)](https://github.com/jtdoherty/equilibrium-protocol/actions/workflows/test.yml)
 
 > A yield-optimization and governance-aggregation layer built on top of [YieldBasis](https://www.yieldbasis.com/).
 
@@ -17,6 +17,43 @@ Deposit `ybBTC`, receive `m-ybBTC`, and earn hands-free, auto-compounding yield.
 2. The **StrategyManager** ("the brain") continuously computes the split between staked and unstaked `ybBTC` that maximizes blended APY, and commands the vault to rebalance when the gain clears a threshold.
 3. A Chainlink-Automation–driven **HarvestKeeper** periodically runs the full cycle: claim `YB` emissions, re-optimize the strategy, auto-compound `ybBTC` fees, lock farmed `YB` into `veYB` (minting liquid `m-YB`), and distribute `EQM` incentives.
 4. Users can stake their `m-ybBTC` in the **Booster** to earn `EQM`, the protocol's incentive/governance token.
+
+```mermaid
+flowchart TD
+    User([User])
+
+    subgraph YB["YieldBasis (external)"]
+        Gauge[Liquidity Gauge]
+        Escrow[Voting Escrow / veYB]
+    end
+
+    subgraph EQP["Equilibrium Protocol"]
+        Vault[EquilibriumVault]
+        SM[StrategyManager]
+        Keeper[HarvestKeeper]
+        Locker[YBLocker]
+        Booster[Booster]
+        RD[RewardDistributor]
+        mybBTC[(m-ybBTC)]
+        mYB[(m-YB)]
+        EQM[(EQM)]
+    end
+
+    User -- deposit ybBTC --> Vault
+    Vault -- mint shares --> mybBTC
+    User -- stake m-ybBTC --> Booster
+    Booster -- earn rewards --> EQM
+
+    Keeper -- 1.optimize --> SM
+    SM -- rebalance --> Vault
+    Vault -- stake / unstake --> Gauge
+    Keeper -- 2.claim YB --> Gauge
+    Keeper -- 3.lock YB --> Locker
+    Locker -- lock --> Escrow
+    Locker -- mint --> mYB
+    Keeper -- 4.distribute --> RD
+    RD -- mint EQM --> Booster
+```
 
 For the full design, economics, and rationale, see [`docs/`](docs/).
 
