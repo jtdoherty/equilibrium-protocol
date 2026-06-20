@@ -22,11 +22,7 @@ contract YBLocker is Ownable, ReentrancyGuard {
     event Relocked(uint256 amount);
     event LockExtended(uint256 newUnlockTime);
 
-    constructor(
-        address _ybTokenAddress, 
-        address _votingEscrowAddress, 
-        address _mYbTokenAddress
-    ) Ownable(msg.sender) {
+    constructor(address _ybTokenAddress, address _votingEscrowAddress, address _mYbTokenAddress) Ownable(msg.sender) {
         YB_TOKEN = IERC20(_ybTokenAddress);
         VOTING_ESCROW = IVotingEscrow(_votingEscrowAddress);
         M_YB_TOKEN = m_YB(_mYbTokenAddress);
@@ -40,7 +36,7 @@ contract YBLocker is Ownable, ReentrancyGuard {
             VOTING_ESCROW.increase_unlock_time(newUnlockTime);
             emit LockExtended(newUnlockTime);
         }
-        
+
         // 2. Lock any new YB tokens this contract has received
         uint256 balance = YB_TOKEN.balanceOf(address(this));
         if (balance == 0) return;
@@ -62,7 +58,7 @@ contract YBLocker is Ownable, ReentrancyGuard {
         // 3. Mint the liquid derivative to the owner (the HarvestKeeper)
         M_YB_TOKEN.mint(owner(), balance);
     }
-    
+
     // Security function to recover other ERC20 tokens sent here by mistake
     function sweep(address _token) external onlyOwner {
         require(_token != address(YB_TOKEN), "YBLocker: Cannot sweep the primary token");

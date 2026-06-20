@@ -36,7 +36,7 @@ contract StrategyManagerTest is Test {
         // Deploy Mock tokens
         ybBTC = new MockERC20("YieldBasis BTC", "ybBTC");
         YB_TOKEN = new MockERC20("YieldBasis Token", "YB");
-        
+
         // Deploy Mock Liquidity Gauge (stakingToken: ybBTC, rewardToken: YB_TOKEN)
         ybStakingGauge = new MockLiquidityGauge(address(ybBTC), address(YB_TOKEN));
 
@@ -57,10 +57,7 @@ contract StrategyManagerTest is Test {
 
         // Deploy StrategyManager
         strategyManager = new StrategyManager(
-            address(vault),
-            address(ybStakingGauge),
-            address(ybGaugeController),
-            address(ybPriceFeed)
+            address(vault), address(ybStakingGauge), address(ybGaugeController), address(ybPriceFeed)
         );
 
         // Transfer ownership of mYBBTC to the vault
@@ -116,7 +113,7 @@ contract StrategyManagerTest is Test {
 
     function testGetStakedAPY() public {
         // Need to set up state for Staked APY calculation
-        
+
         // 1. Set the YB emission rate (per second) used for the staked-APY estimate.
         uint256 globalYBInflationRate = 1000e18; // YB emissions per second
         vm.prank(deployer); // StrategyManager owner
@@ -127,7 +124,7 @@ contract StrategyManagerTest is Test {
 
         // 3. Simulate total staked assets in gauge
         uint256 hypotheticalStakedAssets = 500e18; // 500 ybBTC staked
-        
+
         // Deposit some funds into the vault to have totalAssets > 0
         vm.startPrank(user);
         ybBTC.approve(address(vault), 100e18);
@@ -185,20 +182,25 @@ contract StrategyManagerTest is Test {
         uint256 optimalAllocation = strategyManager.findOptimalAllocation(currentTotalAssets);
         console.log("Calculated Optimal Allocation:", optimalAllocation);
         console.log("Unstaked APY:", strategyManager.getUnstakedAPY());
-        console.log("Staked APY (at optimal):", strategyManager.getStakedAPY(currentTotalAssets * optimalAllocation / 10000));
+        console.log(
+            "Staked APY (at optimal):", strategyManager.getStakedAPY(currentTotalAssets * optimalAllocation / 10000)
+        );
 
         // Calculate the expected percentageChange that StrategyManager will pass to vault.rebalance
         int256 expectedPercentageChange = int256(optimalAllocation) - int256(strategyManager.currentStakedAllocation());
 
         // Expect a call to rebalance on the vault with the exact calculated argument
         vm.expectCall(
-            address(vault),
-            abi.encodeWithSelector(IEquilibriumVault.rebalance.selector, expectedPercentageChange)
+            address(vault), abi.encodeWithSelector(IEquilibriumVault.rebalance.selector, expectedPercentageChange)
         );
         strategyManager.switchStrategy();
 
         // Assert that the staked allocation has changed
-        assertEq(strategyManager.currentStakedAllocation(), optimalAllocation, "StrategyManager's staked allocation should match optimal");
+        assertEq(
+            strategyManager.currentStakedAllocation(),
+            optimalAllocation,
+            "StrategyManager's staked allocation should match optimal"
+        );
         vm.stopPrank();
     }
 }

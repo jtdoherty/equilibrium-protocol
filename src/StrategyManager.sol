@@ -43,7 +43,7 @@ contract StrategyManager is Ownable {
     // would come from a real YieldBasis integration; until then they are explicit parameters
     // rather than misleading on-chain reads.
     uint256 public ybEmissionRatePerSecond; // YB emitted to this gauge per second
-    uint256 public externalGaugeStake;      // ybBTC staked in the gauge by everyone except this vault
+    uint256 public externalGaugeStake; // ybBTC staked in the gauge by everyone except this vault
 
     // --- Events ---
     event StrategyRebalanced(uint256 newStakedAllocation);
@@ -54,12 +54,9 @@ contract StrategyManager is Ownable {
     error InvalidAllocation(int256 newAllocation);
     error ZeroTotalAssets();
 
-    constructor(
-        address _vault,
-        address _ybStakingGauge,
-        address _ybGaugeController,
-        address _ybPriceFeed
-    ) Ownable(msg.sender) {
+    constructor(address _vault, address _ybStakingGauge, address _ybGaugeController, address _ybPriceFeed)
+        Ownable(msg.sender)
+    {
         VAULT = IEquilibriumVault(_vault);
         YB_STAKING_GAUGE = ILiquidityGauge(_ybStakingGauge);
         YB_GAUGE_CONTROLLER = IGaugeController(_ybGaugeController);
@@ -86,14 +83,17 @@ contract StrategyManager is Ownable {
 
         // Check if the change is significant enough to warrant a rebalance
         // currentStakedAllocation is scaled by 10000 (100% = 10000)
-        if ((optimalAllocation > currentStakedAllocation && optimalAllocation - currentStakedAllocation > rebalanceThreshold) ||
-            (currentStakedAllocation > optimalAllocation && currentStakedAllocation - optimalAllocation > rebalanceThreshold)) {
-            
+        if (
+            (optimalAllocation > currentStakedAllocation
+                    && optimalAllocation - currentStakedAllocation > rebalanceThreshold)
+                || (currentStakedAllocation > optimalAllocation
+                    && currentStakedAllocation - optimalAllocation > rebalanceThreshold)
+        ) {
             // Calculate the percentage change needed by the vault
             int256 percentageChange = int256(optimalAllocation) - int256(currentStakedAllocation);
-            VAULT.rebalance(percentageChange); 
+            VAULT.rebalance(percentageChange);
             currentStakedAllocation = optimalAllocation; // Update manager's state
-            
+
             emit StrategyRebalanced(optimalAllocation);
         }
 
@@ -128,12 +128,13 @@ contract StrategyManager is Ownable {
             uint256 ourHypotheticalStake = (_totalVaultAssets * i) / 100;
             uint256 totalHypotheticalStakeInGauge = totalStakedInGaugeByOthers + ourHypotheticalStake;
 
-            uint256 stakedApy = totalHypotheticalStakeInGauge == 0
-                ? 0
-                : (yearlyRewardValue * 1e18) / totalHypotheticalStakeInGauge;
+            uint256 stakedApy =
+                totalHypotheticalStakeInGauge == 0 ? 0 : (yearlyRewardValue * 1e18) / totalHypotheticalStakeInGauge;
 
             // Calculate the blended APY for the vault's total assets
-            uint256 blendedApy = ((ourHypotheticalStake * stakedApy) + ((_totalVaultAssets - ourHypotheticalStake) * unstakedApy)) / _totalVaultAssets;
+            uint256 blendedApy =
+                ((ourHypotheticalStake * stakedApy) + ((_totalVaultAssets - ourHypotheticalStake) * unstakedApy))
+                    / _totalVaultAssets;
 
             if (blendedApy > maxAPY) {
                 maxAPY = blendedApy;
@@ -163,7 +164,7 @@ contract StrategyManager is Ownable {
     function _yearlyRewardValue() internal view returns (uint256) {
         uint256 emissionsPerYear = ybEmissionRatePerSecond * ONE_YEAR_IN_SECONDS;
 
-        (, int256 price, , , ) = YB_PRICE_FEED.latestRoundData();
+        (, int256 price,,,) = YB_PRICE_FEED.latestRoundData();
         require(price > 0, "Strategy: YB Price must be positive");
         uint256 ybPrice = uint256(price) * 1e10; // Chainlink 8 decimals -> 18
 
@@ -176,10 +177,10 @@ contract StrategyManager is Ownable {
      */
     function getUnstakedAPY() public view returns (uint256) {
         uint256 totalFeeRevenueInWindow = 0;
-        for (uint i = 0; i < FEE_HISTORY_WINDOW_DAYS; i++) {
+        for (uint256 i = 0; i < FEE_HISTORY_WINDOW_DAYS; i++) {
             totalFeeRevenueInWindow += dailyUnstakedFeeRevenue[i];
         }
-        
+
         // If the fee data is stale, extrapolate or use zero
         // For simplicity, let's just use the current average rate if not updated daily.
         uint256 totalAssets = VAULT.totalAssets();

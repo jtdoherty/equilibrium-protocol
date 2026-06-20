@@ -15,7 +15,7 @@ contract MockLiquidityGauge {
     using SafeERC20 for IERC20; // Use SafeERC20
 
     IERC20 public immutable stakingToken; // The token to be staked (ybBTC)
-    IERC20 public immutable rewardToken;  // The reward token (YB)
+    IERC20 public immutable rewardToken; // The reward token (YB)
 
     mapping(address => uint256) public balances; // Maps receiver to staked balance
     mapping(address => uint256) public claimable_rewards;

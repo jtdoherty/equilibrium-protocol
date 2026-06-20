@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {KeeperCompatibleInterface} from "chainlink-brownie-contracts/contracts/src/v0.8/automation/interfaces/KeeperCompatibleInterface.sol";
+import {
+    KeeperCompatibleInterface
+} from "chainlink-brownie-contracts/contracts/src/v0.8/automation/interfaces/KeeperCompatibleInterface.sol";
 import {IERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "lib/openzeppelin-contracts/contracts/access/Ownable.sol";
 import {SafeERC20} from "lib/openzeppelin-contracts/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -21,7 +23,7 @@ contract HarvestKeeper is KeeperCompatibleInterface, Ownable {
     // --- State Variables ---
     uint256 public immutable interval;
     uint256 public lastUpdateTime;
-    
+
     // External protocol tokens
     IERC20 public immutable YB_TOKEN;
     IERC20 public immutable YB_BTC_TOKEN;
@@ -100,6 +102,7 @@ contract HarvestKeeper is KeeperCompatibleInterface, Ownable {
     function addHarvestableYBFees(uint256 amount) external {
         YB_TOKEN.safeTransferFrom(msg.sender, address(this), amount);
     }
+
     function addHarvestableBtcFees(uint256 amount) external {
         YB_BTC_TOKEN.safeTransferFrom(msg.sender, address(this), amount);
     }

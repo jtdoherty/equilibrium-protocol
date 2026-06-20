@@ -14,7 +14,7 @@ contract YBLockerTest is Test {
     YBLocker public ybLocker;
 
     address public deployer; // Owner of YBLocker and initial mYB_TOKEN owner
-    address public user;     // User who provides YB_TOKEN
+    address public user; // User who provides YB_TOKEN
 
     function setUp() public {
         deployer = makeAddr("deployer");
@@ -93,12 +93,24 @@ contract YBLockerTest is Test {
         vm.stopPrank();
 
         // Verify total YB_TOKEN in VotingEscrow
-        assertEq(YB_TOKEN.balanceOf(address(votingEscrow)), initialLockAmount + additionalLockAmount, "Total YB_TOKEN in VotingEscrow after relock");
+        assertEq(
+            YB_TOKEN.balanceOf(address(votingEscrow)),
+            initialLockAmount + additionalLockAmount,
+            "Total YB_TOKEN in VotingEscrow after relock"
+        );
 
         // Verify updated voting power for YBLocker
-        assertEq(votingEscrow.balanceOf(address(ybLocker)), initialLockAmount + additionalLockAmount, "Updated voting power for YBLocker");
+        assertEq(
+            votingEscrow.balanceOf(address(ybLocker)),
+            initialLockAmount + additionalLockAmount,
+            "Updated voting power for YBLocker"
+        );
 
         // Verify deployer (owner of YBLocker) received additional m_YB_TOKEN
-        assertEq(mYB_TOKEN.balanceOf(deployer), initialLockAmount + additionalLockAmount, "Total m_YB minted to deployer after relock");
+        assertEq(
+            mYB_TOKEN.balanceOf(deployer),
+            initialLockAmount + additionalLockAmount,
+            "Total m_YB minted to deployer after relock"
+        );
     }
 }

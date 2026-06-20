@@ -16,7 +16,7 @@ contract BoosterTest is Test {
     RewardDistributor public rewardDistributor;
 
     address public deployer; // Owner of EQM, RewardDistributor initially, and mYBBTC for minting
-    address public user;     // User staking mYBBTC
+    address public user; // User staking mYBBTC
 
     function setUp() public {
         deployer = makeAddr("deployer");
@@ -101,7 +101,7 @@ contract BoosterTest is Test {
         vm.stopPrank();
 
         // Deployer, as owner of RewardDistributor, triggers reward distribution
-        vm.startPrank(deployer); 
+        vm.startPrank(deployer);
         rewardDistributor.distributeRewards(rewardAmount); // This will cause RewardDistributor to mint EQM to Booster
         vm.stopPrank();
 
@@ -109,7 +109,7 @@ contract BoosterTest is Test {
         skip(3.5 days);
 
         // Calculate expected earned rewards
-        uint256 expectedEarned = (rewardAmount * (3.5 days)) / rewardDuration; 
+        uint256 expectedEarned = (rewardAmount * (3.5 days)) / rewardDuration;
         assertApproxEqAbs(booster.earned(user), expectedEarned, 1e16, "Earned rewards after partial duration incorrect");
 
         skip(3.5 days); // Skip remaining duration
@@ -131,7 +131,9 @@ contract BoosterTest is Test {
         // Long after the period ends, earned must be capped at the funded amount,
         // not keep growing with elapsed time.
         skip(70 days);
-        assertApproxEqAbs(booster.earned(user), rewardAmount, 1e16, "Earned must not exceed the funded reward after the period ends");
+        assertApproxEqAbs(
+            booster.earned(user), rewardAmount, 1e16, "Earned must not exceed the funded reward after the period ends"
+        );
 
         // And the user can actually claim it (the Booster holds exactly rewardAmount).
         vm.prank(user);
@@ -150,7 +152,7 @@ contract BoosterTest is Test {
         vm.stopPrank();
 
         // Deployer, as owner of RewardDistributor, triggers reward distribution
-        vm.startPrank(deployer); 
+        vm.startPrank(deployer);
         rewardDistributor.distributeRewards(rewardAmount);
         vm.stopPrank();
 
@@ -190,6 +192,8 @@ contract BoosterTest is Test {
         assertEq(booster.balanceOf(user), stakeAmount - withdrawAmount, "User staked balance should decrease");
         assertEq(booster.totalSupply(), stakeAmount - withdrawAmount, "Booster total supply should decrease");
         assertEq(mYBBTC.balanceOf(user), 900e18 + withdrawAmount, "User mYBBTC balance should increase");
-        assertEq(mYBBTC.balanceOf(address(booster)), stakeAmount - withdrawAmount, "Booster mYBBTC balance should decrease");
+        assertEq(
+            mYBBTC.balanceOf(address(booster)), stakeAmount - withdrawAmount, "Booster mYBBTC balance should decrease"
+        );
     }
 }

@@ -28,7 +28,7 @@ contract EquilibriumVaultTest is Test {
         // Deploy Mock tokens
         ybBTC = new MockERC20("YieldBasis BTC", "ybBTC");
         YB_TOKEN = new MockERC20("YieldBasis Token", "YB");
-        
+
         // Deploy Mock Liquidity Gauge (stakingToken: ybBTC, rewardToken: YB_TOKEN)
         ybStakingGauge = new MockLiquidityGauge(address(ybBTC), address(YB_TOKEN));
 
@@ -57,7 +57,7 @@ contract EquilibriumVaultTest is Test {
         mYBBTC.transferOwnership(address(vault));
         // Set the StrategyManager in the Vault (now deployer is the owner of vault)
         vault.setManager(address(strategyManager));
-        
+
         vm.stopPrank(); // Stop pranking as deployer
 
         // Mint some ybBTC for the user (user is not deployer)
@@ -74,7 +74,11 @@ contract EquilibriumVaultTest is Test {
         vm.stopPrank();
 
         // First depositor receives deposit minus the permanently-locked MINIMUM_LIQUIDITY.
-        assertEq(mYBBTC.balanceOf(user), depositAmount - vault.MINIMUM_LIQUIDITY(), "User should receive m-ybBTC equal to deposit minus locked minimum");
+        assertEq(
+            mYBBTC.balanceOf(user),
+            depositAmount - vault.MINIMUM_LIQUIDITY(),
+            "User should receive m-ybBTC equal to deposit minus locked minimum"
+        );
 
         // Check vault's ybBTC balance
         assertEq(ybBTC.balanceOf(address(vault)), depositAmount, "Vault should hold deposited ybBTC");
@@ -93,7 +97,11 @@ contract EquilibriumVaultTest is Test {
         vm.stopPrank();
 
         assertEq(mYBBTC.totalSupply(), depositAmount, "Total share supply should include the locked minimum");
-        assertEq(mYBBTC.balanceOf(0x000000000000000000000000000000000000dEaD), vault.MINIMUM_LIQUIDITY(), "Minimum liquidity should be locked at the dead address");
+        assertEq(
+            mYBBTC.balanceOf(0x000000000000000000000000000000000000dEaD),
+            vault.MINIMUM_LIQUIDITY(),
+            "Minimum liquidity should be locked at the dead address"
+        );
     }
 
     function testFirstDepositTooSmallReverts() public {
@@ -116,7 +124,9 @@ contract EquilibriumVaultTest is Test {
         vm.stopPrank();
 
         // Assert initial state after deposit for clarity
-        assertEq(mYBBTC.balanceOf(user), depositAmount - vault.MINIMUM_LIQUIDITY(), "User should have m-ybBTC after deposit");
+        assertEq(
+            mYBBTC.balanceOf(user), depositAmount - vault.MINIMUM_LIQUIDITY(), "User should have m-ybBTC after deposit"
+        );
         assertEq(ybBTC.balanceOf(address(vault)), depositAmount, "Vault should hold ybBTC after deposit");
         assertEq(ybBTC.balanceOf(user), 900e18, "User ybBTC balance correct after deposit");
 
@@ -127,10 +137,18 @@ contract EquilibriumVaultTest is Test {
         vm.stopPrank();
 
         // Check user's m_ybBTC balance after withdrawal
-        assertEq(mYBBTC.balanceOf(user), depositAmount - withdrawAmount - vault.MINIMUM_LIQUIDITY(), "User's m-ybBTC should decrease after withdrawal");
+        assertEq(
+            mYBBTC.balanceOf(user),
+            depositAmount - withdrawAmount - vault.MINIMUM_LIQUIDITY(),
+            "User's m-ybBTC should decrease after withdrawal"
+        );
 
         // Check vault's ybBTC balance after withdrawal
-        assertEq(ybBTC.balanceOf(address(vault)), depositAmount - withdrawAmount, "Vault's ybBTC should decrease after withdrawal");
+        assertEq(
+            ybBTC.balanceOf(address(vault)),
+            depositAmount - withdrawAmount,
+            "Vault's ybBTC should decrease after withdrawal"
+        );
 
         // Check user's ybBTC balance after withdrawal
         assertEq(ybBTC.balanceOf(user), 900e18 + withdrawAmount, "User's ybBTC should increase after withdrawal");

@@ -23,7 +23,7 @@ contract EquilibriumEndToEndTest is Test {
     // --- User and Keeper Addresses ---
     address public deployer;
     address public alice; // Regular user
-    address public bob;   // Another regular user
+    address public bob; // Another regular user
 
     // --- Mock Contracts ---
     MockERC20 public ybBTC_mock;
@@ -46,7 +46,7 @@ contract EquilibriumEndToEndTest is Test {
 
     // --- Constants ---
     uint256 public constant INITIAL_YB_BTC_DEPOSIT = 1_000 ether; // 1,000 ybBTC
-    uint256 public constant KEEPER_INTERVAL = 1 hours;           // HarvestKeeper interval
+    uint256 public constant KEEPER_INTERVAL = 1 hours; // HarvestKeeper interval
 
     function setUp() public {
         deployer = makeAddr("deployer");
@@ -58,7 +58,7 @@ contract EquilibriumEndToEndTest is Test {
         // 1. Deploy Mock Contracts
         ybBTC_mock = new MockERC20("YieldBasis BTC", "ybBTC");
         YB_mock = new MockERC20("YieldBasis Token", "YB");
-        ybPriceFeed_mock = new MockChainlinkAggregator(8, 10 * 1e8); 
+        ybPriceFeed_mock = new MockChainlinkAggregator(8, 10 * 1e8);
 
         ybVotingEscrow_mock = new MockVotingEscrow(address(YB_mock));
         ybGaugeController_mock = new MockGaugeController(address(YB_mock));
@@ -67,13 +67,14 @@ contract EquilibriumEndToEndTest is Test {
         // 2. Deploy Equilibrium Tokens (with deployer as initial owner, ownership will be transferred later)
         m_ybBTC_token = new m_ybBTC(deployer);
         m_YB_token = new m_YB(deployer);
-        EQM_token = new EQM(deployer); 
+        EQM_token = new EQM(deployer);
 
         // 3. Deploy Core Equilibrium Contracts with deployer as initial owner
         rewardDistributor = new RewardDistributor(address(EQM_token));
         ybLocker = new YBLocker(address(YB_mock), address(ybVotingEscrow_mock), address(m_YB_token));
         booster = new Booster(address(m_ybBTC_token), address(EQM_token));
-        equilibriumVault = new EquilibriumVault(address(ybBTC_mock), address(m_ybBTC_token), address(ybStakingGauge_mock));
+        equilibriumVault =
+            new EquilibriumVault(address(ybBTC_mock), address(m_ybBTC_token), address(ybStakingGauge_mock));
         strategyManager = new StrategyManager(
             address(equilibriumVault),
             address(ybStakingGauge_mock),
@@ -107,7 +108,7 @@ contract EquilibriumEndToEndTest is Test {
         rewardDistributor.transferOwnership(address(harvestKeeper));
         strategyManager.transferOwnership(address(harvestKeeper));
         // Booster owned by RewardDistributor as it calls notifyRewardAmount
-        booster.transferOwnership(address(rewardDistributor)); 
+        booster.transferOwnership(address(rewardDistributor));
 
         // Now, deployer is done with mass transfers. Stop prank and let HarvestKeeper or RewardDistributor act.
         vm.stopPrank();
@@ -119,7 +120,7 @@ contract EquilibriumEndToEndTest is Test {
         vm.stopPrank();
 
         // Fund users with ybBTC
-        vm.startPrank(deployer); 
+        vm.startPrank(deployer);
         ybBTC_mock.mint(alice, INITIAL_YB_BTC_DEPOSIT);
         ybBTC_mock.mint(bob, INITIAL_YB_BTC_DEPOSIT);
         vm.stopPrank();
@@ -152,7 +153,9 @@ contract EquilibriumEndToEndTest is Test {
         uint256 minLiquidity = equilibriumVault.MINIMUM_LIQUIDITY();
         uint256 aliceShares = m_ybBTC_token.balanceOf(alice);
         assertEq(ybBTC_mock.balanceOf(address(equilibriumVault)), INITIAL_YB_BTC_DEPOSIT, "Vault should hold ybBTC");
-        assertEq(aliceShares, INITIAL_YB_BTC_DEPOSIT - minLiquidity, "Alice should receive m_ybBTC minus locked minimum");
+        assertEq(
+            aliceShares, INITIAL_YB_BTC_DEPOSIT - minLiquidity, "Alice should receive m_ybBTC minus locked minimum"
+        );
         assertEq(equilibriumVault.totalAssets(), INITIAL_YB_BTC_DEPOSIT, "Vault total assets incorrect after deposit");
 
         vm.startPrank(alice);
@@ -163,7 +166,9 @@ contract EquilibriumEndToEndTest is Test {
         // Alice gets back her deposit minus the permanently-locked minimum, which stays in the vault.
         assertEq(ybBTC_mock.balanceOf(alice), INITIAL_YB_BTC_DEPOSIT - minLiquidity, "Alice should have ybBTC back");
         assertEq(m_ybBTC_token.balanceOf(alice), 0, "Alice should have 0 m_ybBTC");
-        assertEq(ybBTC_mock.balanceOf(address(equilibriumVault)), minLiquidity, "Vault retains the locked minimum backing");
+        assertEq(
+            ybBTC_mock.balanceOf(address(equilibriumVault)), minLiquidity, "Vault retains the locked minimum backing"
+        );
         assertEq(equilibriumVault.totalAssets(), minLiquidity, "Vault total assets should equal the locked minimum");
     }
 
@@ -193,7 +198,11 @@ contract EquilibriumEndToEndTest is Test {
         harvestKeeper.performUpkeep("");
 
         assertGt(equilibriumVault.stakedAllocation(), 0, "Vault should have staked when staking APY dominates");
-        assertEq(uint256(equilibriumVault.currentStrategy()), uint256(EquilibriumVault.Strategy.Staked), "Vault strategy should be Staked");
+        assertEq(
+            uint256(equilibriumVault.currentStrategy()),
+            uint256(EquilibriumVault.Strategy.Staked),
+            "Vault strategy should be Staked"
+        );
 
         // --- Scenario 2: trading fees now dominate -> vault should unstake ---
         // Set the staked-APY emission rate to 0 and pump the trailing fee revenue
@@ -212,8 +221,13 @@ contract EquilibriumEndToEndTest is Test {
         harvestKeeper.performUpkeep("");
 
         assertLt(equilibriumVault.stakedAllocation(), stakedBefore, "Vault should have unstaked when fee APY dominates");
-        assertEq(uint256(equilibriumVault.currentStrategy()), uint256(EquilibriumVault.Strategy.Unstaked), "Vault strategy should be Unstaked");
+        assertEq(
+            uint256(equilibriumVault.currentStrategy()),
+            uint256(EquilibriumVault.Strategy.Unstaked),
+            "Vault strategy should be Unstaked"
+        );
     }
+
     function testUpkeepRunsWithNoEmissions() public {
         // Deposit so the vault has assets, but do NOT seed any claimable YB in the gauge.
         vm.startPrank(alice);
@@ -229,7 +243,11 @@ contract EquilibriumEndToEndTest is Test {
         harvestKeeper.performUpkeep("");
 
         // EQM incentives are still distributed even though no YB was claimable.
-        assertGt(EQM_token.balanceOf(address(booster)), initialEQMBooster, "Upkeep should still distribute EQM with no emissions");
+        assertGt(
+            EQM_token.balanceOf(address(booster)),
+            initialEQMBooster,
+            "Upkeep should still distribute EQM with no emissions"
+        );
     }
 
     function testHarvestKeeperLocksYBAndDistributesEQM() public {
@@ -253,10 +271,16 @@ contract EquilibriumEndToEndTest is Test {
         // into the VotingEscrow (so neither the keeper nor the locker still holds raw YB).
         assertEq(YB_mock.balanceOf(address(harvestKeeper)), 0, "Keeper should have forwarded all YB");
         assertEq(YB_mock.balanceOf(address(ybLocker)), 0, "YBLocker should have locked, not held, the YB");
-        assertEq(ybVotingEscrow_mock.balanceOf(address(ybLocker)), simulatedYBEmission, "VotingEscrow should hold the locked YB");
+        assertEq(
+            ybVotingEscrow_mock.balanceOf(address(ybLocker)),
+            simulatedYBEmission,
+            "VotingEscrow should hold the locked YB"
+        );
 
         // Locking mints liquid m_YB to the locker's owner, the HarvestKeeper.
-        assertEq(m_YB_token.balanceOf(address(harvestKeeper)), simulatedYBEmission, "Keeper should hold the minted m_YB");
+        assertEq(
+            m_YB_token.balanceOf(address(harvestKeeper)), simulatedYBEmission, "Keeper should hold the minted m_YB"
+        );
 
         // The keeper distributed EQM incentives to the Booster via the RewardDistributor.
         assertGt(EQM_token.balanceOf(address(booster)), initialEQMBooster, "Booster should have received EQM rewards");
@@ -267,7 +291,7 @@ contract EquilibriumEndToEndTest is Test {
         // After setUp, HarvestKeeper owns many contracts, so it will be the privileged caller.
         // We'll test direct calls from an unauthorized user.
 
-        address unauthorized = alice; 
+        address unauthorized = alice;
 
         // Test setBooster in RewardDistributor (owned by HarvestKeeper)
         vm.startPrank(unauthorized);
@@ -282,7 +306,7 @@ contract EquilibriumEndToEndTest is Test {
         vm.stopPrank();
 
         // Test setBooster in Booster (owned by RewardDistributor, which is owned by HarvestKeeper) - this is a nested ownership scenario
-        // In setup, booster.transferOwnership(address(rewardDistributor)); 
+        // In setup, booster.transferOwnership(address(rewardDistributor));
         // So unauthorized should not be able to call notifyRewardAmount from Booster
         vm.startPrank(unauthorized);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, unauthorized));

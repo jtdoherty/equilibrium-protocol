@@ -22,7 +22,12 @@ contract MockVotingEscrow {
     /**
      * @notice Mocks creating a lock. Simply records the locked amount.
      */
-    function create_lock(uint256 _value, uint256 /*_unlock_time*/) external {
+    function create_lock(
+        uint256 _value,
+        uint256 /*_unlock_time*/
+    )
+        external
+    {
         require(_value > 0, "Cannot lock 0");
         stakingToken.transferFrom(msg.sender, address(this), _value);
         lockedBalances[msg.sender] += _value;
@@ -31,7 +36,12 @@ contract MockVotingEscrow {
     /**
      * @notice Mocks increasing the amount in an existing lock.
      */
-    function increase_amount(uint256 _value, address /*_addr*/) external {
+    function increase_amount(
+        uint256 _value,
+        address /*_addr*/
+    )
+        external
+    {
         require(_value > 0, "Cannot add 0");
         stakingToken.transferFrom(msg.sender, address(this), _value);
         lockedBalances[msg.sender] += _value; // Add to existing lock
@@ -40,7 +50,10 @@ contract MockVotingEscrow {
     /**
      * @notice Mocks increasing the unlock time. For this mock, it does nothing as we don't track unlock times in detail.
      */
-    function increase_unlock_time(uint256 /*_new_unlock_time*/) external {
+    function increase_unlock_time(
+        uint256 /*_new_unlock_time*/
+    )
+        external {
         // In a real scenario, this would update the unlock time.
         // For this mock, we'll just let it pass without specific logic.
     }

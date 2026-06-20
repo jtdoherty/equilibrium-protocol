@@ -61,7 +61,7 @@ contract RewardDistributor is Ownable {
 
         emit EqmDistributed(booster, _amount, distributionDuration);
     }
-    
+
     // --- Admin Functions ---
     /**
      * @notice Sets or updates the address of the Booster contract.

@@ -23,7 +23,6 @@ import {RewardDistributor} from "../src/RewardDistributor.sol";
 // Control
 import {HarvestKeeper} from "../src/HarvestKeeper.sol";
 
-
 contract DeployFlywheel is Script {
     function run() external returns (address keeperAddress) {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -36,7 +35,7 @@ contract DeployFlywheel is Script {
         MockERC20 ybToken = new MockERC20("YieldBasis Token", "YB");
         MockERC20 ybBtcToken = new MockERC20("YieldBasis BTC", "ybBTC");
         MockVotingEscrow votingEscrow = new MockVotingEscrow(address(ybToken));
-        MockLiquidityGauge ybStakingGauge = new MockLiquidityGauge(address(ybBtcToken), address(ybToken)); 
+        MockLiquidityGauge ybStakingGauge = new MockLiquidityGauge(address(ybBtcToken), address(ybToken));
         MockChainlinkAggregator ybPriceFeed = new MockChainlinkAggregator(8, 1e8); // 8 decimals, initial price 1 USD
         MockGaugeController ybGaugeController = new MockGaugeController(address(ybToken)); // Deploy MockGaugeController
 
@@ -46,13 +45,10 @@ contract DeployFlywheel is Script {
         m_YB mYbToken = new m_YB(deployer);
 
         // Core & Economics
-        EquilibriumVault vault = new EquilibriumVault(
-            address(ybBtcToken),
-            address(mYbBtcToken),
-            address(ybStakingGauge)
-        );
+        EquilibriumVault vault =
+            new EquilibriumVault(address(ybBtcToken), address(mYbBtcToken), address(ybStakingGauge));
         Booster booster = new Booster(address(mYbBtcToken), address(eqmToken));
-        RewardDistributor rewardDistributor = new RewardDistributor(address(eqmToken)); 
+        RewardDistributor rewardDistributor = new RewardDistributor(address(eqmToken));
         YBLocker ybLocker = new YBLocker(address(ybToken), address(votingEscrow), address(mYbToken));
         StrategyManager strategyManager = new StrategyManager(
             address(vault),
@@ -74,7 +70,7 @@ contract DeployFlywheel is Script {
             oneMinute
         );
         keeperAddress = address(harvestKeeper);
-        
+
         // --- 2. CONFIGURATION (The Ownership Dance) ---
         console.log("--- Configuring Permissions ---");
         // Give Vault permission to mint m_ybBTC
@@ -87,7 +83,7 @@ contract DeployFlywheel is Script {
         eqmToken.transferOwnership(address(rewardDistributor));
         // Set StrategyManager in the Vault
         vault.setManager(address(strategyManager));
-        
+
         // Give Keeper full control over other contracts
         vault.transferOwnership(address(harvestKeeper));
         ybLocker.transferOwnership(address(harvestKeeper));
@@ -97,7 +93,7 @@ contract DeployFlywheel is Script {
         // --- 3. MINT MOCK TOKENS FOR TESTING ---
         ybBtcToken.mint(deployer, 1000 ether);
         ybToken.mint(address(ybStakingGauge), 100 ether); // Mint some YB into the gauge as initial rewards
-        
+
         vm.stopBroadcast();
         return keeperAddress;
     }

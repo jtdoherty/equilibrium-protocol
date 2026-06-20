@@ -21,11 +21,14 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
     IERC20 public immutable YB_BTC;
     m_ybBTC public immutable M_YB_BTC;
     ILiquidityGauge public immutable YB_STAKING_GAUGE; // Renamed to GAUGES for clarity
-    
+
     address public strategyManager;
     uint256 public stakedAllocation; // Current percentage of total assets staked (0-10000)
 
-    enum Strategy { Unstaked, Staked }
+    enum Strategy {
+        Unstaked,
+        Staked
+    }
     Strategy public currentStrategy; // Added to explicitly track the vault's current strategy
 
     // Permanently-locked shares minted on the first deposit. By ensuring total share
@@ -39,11 +42,7 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 ybBtcAmount, uint256 mYbBtcShares);
     event Rebalanced(uint256 newStakedAllocation);
 
-    constructor(
-        address _ybBtcAddress, 
-        address _mYbbBtcAddress, 
-        address _ybStakingGaugeAddress
-    ) Ownable(msg.sender) {
+    constructor(address _ybBtcAddress, address _mYbbBtcAddress, address _ybStakingGaugeAddress) Ownable(msg.sender) {
         YB_BTC = IERC20(_ybBtcAddress);
         M_YB_BTC = m_ybBTC(_mYbbBtcAddress);
         YB_STAKING_GAUGE = ILiquidityGauge(_ybStakingGaugeAddress);
@@ -67,7 +66,7 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
         require(_amount > 0, "Vault: Cannot deposit 0");
         uint256 currentTotalAssets = totalAssets();
         uint256 currentTotalShares = M_YB_BTC.totalSupply();
-        
+
         uint256 sharesToMint;
         if (currentTotalShares == 0) {
             // First deposit: lock MINIMUM_LIQUIDITY shares forever; depositor gets the rest.
@@ -80,7 +79,7 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
         }
 
         YB_BTC.safeTransferFrom(msg.sender, address(this), _amount);
-        
+
         // Stake new deposits to match current allocation, if any
         uint256 stakeAmount = (_amount * stakedAllocation) / 10000;
         if (stakeAmount > 0) {
@@ -129,9 +128,9 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
 
         int256 newStakedAllocationInt = int256(stakedAllocation) + _percentageChange;
         require(newStakedAllocationInt >= 0 && newStakedAllocationInt <= 10000, "Vault: Invalid allocation");
-        
+
         uint256 newStakedAllocation = uint256(newStakedAllocationInt);
-        
+
         uint256 currentStaked = YB_STAKING_GAUGE.balanceOf(address(this));
         uint256 currentUnstaked = YB_BTC.balanceOf(address(this));
         uint256 total = currentStaked + currentUnstaked;
@@ -158,7 +157,7 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
         }
         emit Rebalanced(newStakedAllocation);
     }
-    
+
     // --- Admin Functions ---
     /**
      * @notice Sets the address of the StrategyManager.
@@ -167,7 +166,7 @@ contract EquilibriumVault is Ownable, ReentrancyGuard {
     function setManager(address _manager) external onlyOwner {
         strategyManager = _manager;
     }
-    
+
     /**
      * @notice Called by the HarvestKeeper to deposit compounded fees from the unstaked strategy.
      * @dev The HarvestKeeper is the owner of this vault.

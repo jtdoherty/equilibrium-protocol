@@ -17,11 +17,11 @@ contract Booster is Ownable, ReentrancyGuard {
 
     // --- State Variables ---
     IERC20 public immutable M_YB_BTC; // The token users stake
-    IERC20 public immutable EQM;      // The token users earn as a reward
+    IERC20 public immutable EQM; // The token users earn as a reward
 
     // Reward calculation variables
     uint256 public rewardRate;
-    uint256 public periodFinish;   // timestamp at which the current reward period ends
+    uint256 public periodFinish; // timestamp at which the current reward period ends
     uint256 public lastUpdateTime;
     uint256 public rewardPerTokenStored;
     mapping(address => uint256) public userRewardPerTokenPaid;
