@@ -1,10 +1,15 @@
 # Equilibrium Protocol
 
+![Status: Beta](https://img.shields.io/badge/status-beta-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+![Built with Foundry](https://img.shields.io/badge/built%20with-Foundry-black)
+[![CI](https://github.com/jtdoherty/eqm-proto/actions/workflows/test.yml/badge.svg)](https://github.com/jtdoherty/eqm-proto/actions/workflows/test.yml)
+
 > A yield-optimization and governance-aggregation layer built on top of [YieldBasis](https://www.yieldbasis.com/).
 
 Deposit `ybBTC`, receive `m-ybBTC`, and earn hands-free, auto-compounding yield. Equilibrium automatically moves the pool's capital between YieldBasis's two yield sources — **staking for `YB` emissions** and **holding liquid for trading fees** — while perpetually locking the `YB` it farms to build a dominant `veYB` governance position. Think "Convex + Yearn, for YieldBasis."
 
-> **Status:** working prototype. All external YieldBasis dependencies are mocked, and APY/emission math is still placeholder-grade. Not audited, not production-ready. See [Status & limitations](#status--limitations).
+> ⚠️ **Beta — work in progress.** This is a functional prototype for research and demonstration. External YieldBasis dependencies are mocked and some economic parameters are still manual inputs. **Not audited. Do not use with real funds.** See [Status & limitations](#status--limitations).
 
 ## How it works
 
